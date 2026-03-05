@@ -1,13 +1,12 @@
-# Authentiq - Academic Plagiarism Detector
+# Authentiq: An N-Gram Enhanced Plagiarism Detection System for Academic Papers
 
 Authentiq is a full-stack web application for detecting plagiarism in academic papers. It uses TF-IDF (Term Frequency-Inverse Document Frequency) algorithm combined with cosine similarity to compare submitted documents against a corpus of academic papers.
 
 ## Features
 
-- **File Upload Support**: Accepts .txt, .pdf, .doc, and .docx files
+- **File Upload Support**: Accepts .pdf, .doc, and .docx files
 - **TF-IDF Analysis**: Uses advanced text processing and TF-IDF vectorization
 - **Cosine Similarity**: Calculates similarity scores between documents
-- **User Authentication**: Secure JWT-based authentication system
 - **Submission Management**: Track and manage your document submissions
 - **Results Display**: View ranked similarity results with detailed information
 - **Admin Panel**: Manage the academic paper corpus (admin users)
@@ -27,7 +26,6 @@ Authentiq is a full-stack web application for detecting plagiarism in academic p
 ### Frontend
 - **React 18** - UI framework
 - **React Router** - Routing
-- **Axios** - HTTP client
 
 ## Project Structure
 
@@ -114,7 +112,7 @@ The frontend will run on `http://localhost:3000`
 ## Usage
 
 1. **Register/Login**: Create an account or login to access the platform
-2. **Upload Document**: Upload your academic paper (.txt, .pdf, .doc, .docx)
+2. **Upload Document**: Upload your academic paper (.pdf, .doc, .docx)
 3. **Automatic Analysis**: The system automatically processes your document against the corpus
 4. **View Results**: See ranked similarity results with scores and paper details
 5. **Admin Features**: Admin users can manage the corpus by adding/removing papers
@@ -175,13 +173,3 @@ User.create(
 ## License
 
 This project is for educational purposes.
-
-## Future Enhancements
-
-- Background job processing (Celery)
-- Advanced text highlighting for similar sections
-- Batch file processing
-- Export results to PDF
-- Email notifications
-- More sophisticated NLP techniques
-- Database migration system
