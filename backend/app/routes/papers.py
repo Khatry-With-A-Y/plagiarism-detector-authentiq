@@ -1,114 +1,21 @@
-import os
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
+from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from pathlib import Path
 from datetime import datetime
 
 from backend.config import (
-    UPLOAD_FOLDER, CORPUS_FOLDER, MAX_FILE_SIZE, ALLOWED_EXTENSIONS,
-    CORS_ORIGINS
+    UPLOAD_FOLDER, CORPUS_FOLDER, MAX_FILE_SIZE, ALLOWED_EXTENSIONS
 )
-from backend.database import init_database, get_db_connection
-from backend.models import User, Paper, Submission, SimilarityResult
-from backend.auth import (
-    hash_password, verify_password, generate_token, get_current_user,
-    require_auth, require_admin
-)
-from backend.file_processor import extract_text, validate_file
-from backend.similarity import process_submission
+from backend.app.models.models import User, Paper, Submission, SimilarityResult
+from backend.app.utils.auth import get_current_user, require_auth, require_admin
+from backend.app.utils.file_processor import extract_text, validate_file
+from backend.app.utils.cosine import process_submission as compute_similarity
 
-app = Flask(__name__)
-CORS(app, origins=CORS_ORIGINS)
+papers_bp = Blueprint('papers', __name__, url_prefix='/api')
 
-# Ensure upload directories exist
-UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
-CORPUS_FOLDER.mkdir(parents=True, exist_ok=True)
+# ========== submission endpoints ===========
 
-# Initialize database on startup
-with app.app_context():
-    init_database()
-
-# ==================== Authentication Endpoints ====================
-
-@app.route('/api/auth/register', methods=['POST'])
-def register():
-    """User registration"""
-    data = request.get_json()
-    username = data.get('username')
-    email = data.get('email')
-    password = data.get('password')
-    
-    if not all([username, email, password]):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    # Check if user already exists
-    if User.get_by_username(username):
-        return jsonify({'error': 'Username already exists'}), 400
-    if User.get_by_email(email):
-        return jsonify({'error': 'Email already exists'}), 400
-    
-    try:
-        password_hash = hash_password(password)
-        user_id = User.create(username, email, password_hash)
-        user = User.get_by_id(user_id)
-        token = generate_token(user_id, username, user['role'])
-        
-        return jsonify({
-            'message': 'User created successfully',
-            'token': token,
-            'user': {
-                'id': user['id'],
-                'username': user['username'],
-                'email': user['email'],
-                'role': user['role']
-            }
-        }), 201
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-
-@app.route('/api/auth/login', methods=['POST'])
-def login():
-    """User login"""
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    
-    if not all([username, password]):
-        return jsonify({'error': 'Username and password required'}), 400
-    
-    user = User.get_by_username(username)
-    if not user or not verify_password(user['password_hash'], password):
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    token = generate_token(user['id'], user['username'], user['role'])
-    
-    return jsonify({
-        'message': 'Login successful',
-        'token': token,
-        'user': {
-            'id': user['id'],
-            'username': user['username'],
-            'email': user['email'],
-            'role': user['role']
-        }
-    }), 200
-
-@app.route('/api/auth/me', methods=['GET'])
-@require_auth
-def get_current_user_info():
-    """Get current user information"""
-    user = get_current_user()
-    return jsonify({
-        'id': user['id'],
-        'username': user['username'],
-        'email': user['email'],
-        'role': user['role']
-    }), 200
-
-# ==================== Submission Endpoints ====================
-
-@app.route('/api/submissions/upload', methods=['POST'])
+@papers_bp.route('/submissions/upload', methods=['POST'])
 @require_auth
 def upload_submission():
     """Upload a file for plagiarism analysis"""
@@ -170,7 +77,8 @@ def upload_submission():
             file_path.unlink()
         return jsonify({'error': f'Error processing file: {str(e)}'}), 500
 
-@app.route('/api/submissions', methods=['GET'])
+
+@papers_bp.route('/submissions', methods=['GET'])
 @require_auth
 def get_submissions():
     """Get user's submission history"""
@@ -189,7 +97,8 @@ def get_submissions():
         ]
     }), 200
 
-@app.route('/api/submissions/<int:submission_id>/results', methods=['GET'])
+
+@papers_bp.route('/submissions/<int:submission_id>/results', methods=['GET'])
 @require_auth
 def get_submission_results(submission_id):
     """Get similarity results for a submission"""
@@ -221,7 +130,8 @@ def get_submission_results(submission_id):
         ]
     }), 200
 
-@app.route('/api/process/<int:submission_id>', methods=['POST'])
+
+@papers_bp.route('/process/<int:submission_id>', methods=['POST'])
 @require_auth
 def trigger_processing(submission_id):
     """Manually trigger similarity analysis for a submission"""
@@ -237,6 +147,7 @@ def trigger_processing(submission_id):
     process_submission_analysis(submission_id)
     
     return jsonify({'message': 'Processing started'}), 200
+
 
 def process_submission_analysis(submission_id):
     """Process a submission against the corpus"""
@@ -255,7 +166,7 @@ def process_submission_analysis(submission_id):
             return
         
         # Process similarity
-        results = process_submission(
+        results = compute_similarity(
             submission['content_text'],
             corpus_papers
         )
@@ -269,9 +180,10 @@ def process_submission_analysis(submission_id):
         Submission.update_status(submission_id, 'pending')
         raise e
 
-# ==================== Corpus Management Endpoints ====================
 
-@app.route('/api/corpus/upload', methods=['POST'])
+# ======== corpus management ========
+
+@papers_bp.route('/corpus/upload', methods=['POST'])
 @require_auth
 def upload_corpus_paper():
     """Add a paper to the corpus (admin or user)"""
@@ -336,7 +248,8 @@ def upload_corpus_paper():
             file_path.unlink()
         return jsonify({'error': f'Error processing file: {str(e)}'}), 500
 
-@app.route('/api/corpus', methods=['GET'])
+
+@papers_bp.route('/corpus', methods=['GET'])
 @require_auth
 def get_corpus():
     """Get all papers in corpus"""
@@ -355,7 +268,8 @@ def get_corpus():
         ]
     }), 200
 
-@app.route('/api/corpus/<int:paper_id>', methods=['DELETE'])
+
+@papers_bp.route('/corpus/<int:paper_id>', methods=['DELETE'])
 @require_admin
 def delete_corpus_paper(paper_id):
     """Delete a paper from corpus (admin only)"""
@@ -374,12 +288,9 @@ def delete_corpus_paper(paper_id):
     
     return jsonify({'message': 'Paper deleted successfully'}), 200
 
-# ==================== Health Check ====================
 
-@app.route('/api/health', methods=['GET'])
+# health check
+@papers_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'ok'}), 200
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)

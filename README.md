@@ -30,26 +30,35 @@ Authentiq is a full-stack web application for detecting plagiarism in academic p
 ## Project Structure
 
 ```
-authentiq/
+plagiarism-detector-authentiq/
 ├── backend/
-│   ├── app.py                 # Main Flask application
-│   ├── models.py              # Database models
-│   ├── auth.py                # Authentication logic
-│   ├── file_processor.py      # Document extraction
-│   ├── similarity.py          # TF-IDF and cosine similarity
-│   ├── database.py            # Database initialization
-│   ├── config.py              # Configuration settings
-│   ├── init_db.py             # Database initialization script
-│   ├── requirements.txt       # Python dependencies
-│   ├── uploads/               # User uploaded files
-│   └── corpus/                # Academic paper corpus
-├── frontend/
-│   ├── src/
-│   │   ├── components/        # React components
-│   │   ├── services/          # API services
-│   │   ├── App.jsx
-│   │   └── index.js
-│   └── package.json
+│   ├── run.py                 # entry point for starting Flask
+│   ├── config.py              # configuration settings
+│   ├── requirements.txt       # backend Python dependencies
+│   │
+│   ├── app/                   # application package
+│   │   ├── __init__.py        # app factory and blueprint registration
+│   │   ├── models/            # database model classes
+│   │   │   └── models.py
+│   │   ├── routes/            # flask blueprints for API endpoints
+│   │   │   ├── auth.py
+│   │   │   └── papers.py
+│   │   └── utils/             # helper modules
+│   │       ├── database.py
+│   │       ├── file_processor.py
+│   │       ├── text_processing.py
+│   │       ├── tfidf.py
+│   │       └── cosine.py
+│   │
+│   └── data/                  # persistent storage
+│       ├── raw_papers/        # corpus files
+│       ├── processed/         # uploaded submissions
+│       └── database.db        # sqlite database file
+├── frontend/                 # React frontend (unchanged)
+│   ├── package.json
+│   └── src/
+│       ├── components/
+│       └── services/
 └── README.md
 ```
 
@@ -57,35 +66,34 @@ authentiq/
 
 ### Backend Setup
 
-1. Navigate to the backend directory:
+1. From the project root, enter the backend folder (optional):
 ```bash
 cd backend
 ```
 
-2. Create a virtual environment (recommended):
+2. Create and activate a virtual environment (recommended):
 ```bash
 python -m venv venv
-source venv\Scripts\activate
-```
+# Windows
+venv\Scripts\activate
+``` 
 
 3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Initialize the database:
+4. Initialize the database (database file will be created under `backend/data`):
 ```bash
-python init_db.py
+python - <<'PY'
+from backend.app.utils.database import init_database
+init_database()
+PY
 ```
 
-5. Run the Flask server (from project root):
+5. Start the Flask server (from project root):
 ```bash
-# Option 1: Use the run script (recommended)
-python run_backend.py
-
-# Option 2: Run directly
-cd backend
-python app.py
+python backend/run.py
 ```
 
 The backend will run on `http://localhost:5000`
@@ -159,8 +167,8 @@ Edit `backend/config.py` to customize:
 To create an admin user, you can modify the database directly or add a script:
 
 ```python
-from backend.models import User
-from backend.auth import hash_password
+from backend.app.models.models import User
+from backend.app.utils.auth import hash_password
 
 User.create(
     username='admin',

@@ -2,11 +2,15 @@ import sqlite3
 from pathlib import Path
 from backend.config import DATABASE_PATH
 
+
 def get_db_connection():
     """Get a database connection"""
+    # ensure directory exists
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_database():
     """Initialize the database with all required tables"""
@@ -78,6 +82,7 @@ def init_database():
     conn.commit()
     conn.close()
     print(f"Database initialized at {DATABASE_PATH}")
+
 
 if __name__ == '__main__':
     init_database()

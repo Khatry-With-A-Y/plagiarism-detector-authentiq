@@ -35,10 +35,12 @@ def extract_text(file_path, file_type=None):
     except Exception as e:
         raise Exception(f"Error extracting text from {file_path}: {str(e)}")
 
+
 def extract_txt(file_path):
     """Extract text from .txt file"""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         return f.read()
+
 
 def extract_pdf(file_path):
     """Extract text from .pdf file"""
@@ -61,6 +63,7 @@ def extract_pdf(file_path):
                 text += page.extract_text() + "\n"
         return text
 
+
 def extract_docx(file_path):
     """Extract text from .docx file"""
     from docx import Document
@@ -69,6 +72,7 @@ def extract_docx(file_path):
     for paragraph in doc.paragraphs:
         text.append(paragraph.text)
     return "\n".join(text)
+
 
 def extract_doc(file_path):
     """Extract text from .doc file (older Word format)"""
@@ -82,6 +86,7 @@ def extract_doc(file_path):
             "python-docx2txt is required for .doc files. "
             "Install it with: pip install python-docx2txt"
         )
+
 
 def validate_file(file_path, max_size=None, allowed_extensions=None):
     """

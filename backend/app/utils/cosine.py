@@ -1,65 +1,8 @@
 import math
-from collections import Counter
-import re
 from typing import List, Dict, Tuple
 
-class TextProcessor:
-    """Handles text cleaning and preprocessing"""
-    
-    @staticmethod
-    def simple_stem(word):
-        """Very basic stemming without external libraries"""
-        if word.endswith('s'):   return word[:-1]
-        if word.endswith('es'):  return word[:-2]
-        if word.endswith('ing'): return word[:-3]
-        if word.endswith('ed'):  return word[:-2]
-        return word
-    
-    @staticmethod
-    def clean_text(text):
-        """Clean and preprocess text: lowercase, remove punctuation, simple stem"""
-        text = text.lower()
-        text = re.sub(r'[^a-z\s]', '', text)  # remove non-letter characters
-        words = text.split()
-        return [TextProcessor.simple_stem(w) for w in words if w]  # remove empty strings
-
-class TFIDFCalculator:
-    """Handles TF-IDF calculations"""
-    
-    @staticmethod
-    def compute_tf(doc_words):
-        """Term Frequency: count / total words in this document"""
-        total_words = len(doc_words)
-        if total_words == 0:
-            return {}
-        counts = Counter(doc_words)
-        return {word: count / total_words for word, count in counts.items()}
-    
-    @staticmethod
-    def compute_idf(all_docs_words):
-        """Inverse Document Frequency: log(N / (1 + df)) with smoothing"""
-        N = len(all_docs_words)
-        if N == 0:
-            return {}
-        df = Counter()
-        for words in all_docs_words:
-            df.update(set(words))  # count docs containing each term
-        idf = {}
-        for term, count in df.items():
-            idf[term] = math.log(N / (1 + count))
-        return idf
-    
-    @staticmethod
-    def compute_tfidf_vector(tf, idf, all_terms):
-        """Create sparse TF-IDF vector as dict {term: value}"""
-        vector = {}
-        for term in all_terms:
-            tf_val = tf.get(term, 0.0)
-            idf_val = idf.get(term, 0.0)
-            tfidf_val = tf_val * idf_val
-            if tfidf_val > 0:  # only store non-zero for sparsity
-                vector[term] = tfidf_val
-        return vector
+from .text_processing import TextProcessor
+from .tfidf import TFIDFCalculator
 
 class SimilarityEngine:
     """Main engine for computing document similarity"""
@@ -132,7 +75,7 @@ class SimilarityEngine:
         
         return results
 
-# Convenience function for easy usage
+
 def process_submission(submission_text: str, corpus_texts: List[Tuple[int, str]]) -> List[Dict]:
     """
     Convenience function to process a submission.

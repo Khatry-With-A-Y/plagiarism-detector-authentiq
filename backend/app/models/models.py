@@ -1,6 +1,7 @@
 import sqlite3
-from backend.database import get_db_connection
 from datetime import datetime
+from backend.app.utils.database import get_db_connection
+
 
 class User:
     @staticmethod
@@ -50,6 +51,7 @@ class User:
         user = cursor.fetchone()
         conn.close()
         return dict(user) if user else None
+
 
 class Paper:
     @staticmethod
@@ -107,6 +109,7 @@ class Paper:
         conn.close()
         return deleted
 
+
 class Submission:
     @staticmethod
     def create(user_id, filename, file_path, content_text):
@@ -156,6 +159,7 @@ class Submission:
         ''', (status, submission_id))
         conn.commit()
         conn.close()
+
 
 class SimilarityResult:
     @staticmethod

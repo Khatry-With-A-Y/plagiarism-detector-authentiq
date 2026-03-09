@@ -1,5 +1,5 @@
 """Initialize the database"""
-from backend.database import init_database
+from backend.app.utils.database import init_database
 
 if __name__ == '__main__':
     init_database()

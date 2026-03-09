@@ -4,15 +4,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from flask import request, jsonify
 from backend.config import JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
-from backend.models import User
+from backend.app.models.models import User
+
 
 def hash_password(password):
     """Hash a password using Werkzeug"""
     return generate_password_hash(password)
 
+
 def verify_password(password_hash, password):
     """Verify a password against its hash"""
     return check_password_hash(password_hash, password)
+
 
 def generate_token(user_id, username, role):
     """Generate a JWT token for a user"""
@@ -25,6 +28,7 @@ def generate_token(user_id, username, role):
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
+
 def verify_token(token):
     """Verify and decode a JWT token"""
     try:
@@ -34,6 +38,7 @@ def verify_token(token):
         return None
     except jwt.InvalidTokenError:
         return None
+
 
 def get_current_user():
     """Get current user from JWT token in request headers"""
@@ -52,6 +57,7 @@ def get_current_user():
     
     return None
 
+
 def require_auth(f):
     """Decorator to require authentication"""
     @wraps(f)
@@ -61,6 +67,7 @@ def require_auth(f):
             return jsonify({'error': 'Authentication required'}), 401
         return f(*args, **kwargs)
     return decorated_function
+
 
 def require_admin(f):
     """Decorator to require admin role"""
