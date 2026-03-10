@@ -1,4 +1,4 @@
-// Auth utility functions
+// simple helpers for token/user storage
 
 export const setAuthToken = (token) => {
   if (token) {

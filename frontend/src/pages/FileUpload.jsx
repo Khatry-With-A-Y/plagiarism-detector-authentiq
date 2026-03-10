@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { submissionsAPI } from '../services/api';
+import { submissionsAPI } from '../api/results';
 
 function FileUpload({ onUploadSuccess }) {
   const [file, setFile] = useState(null);

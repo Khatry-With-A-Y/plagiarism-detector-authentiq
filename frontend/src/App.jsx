@@ -1,10 +1,10 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { isAuthenticated } from './services/auth';
-import Login from './components/Login';
-import Register from './components/Register';
-import Dashboard from './components/Dashboard';
-import AdminPanel from './components/AdminPanel';
+import { isAuthenticated, isAdmin as checkAdmin } from './utils/auth';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Dashboard from './pages/Dashboard';
+import AdminPanel from './pages/AdminPanel';
 import './index.css';
 
 // Protected Route component
@@ -14,8 +14,7 @@ const ProtectedRoute = ({ children }) => {
 
 // Admin Route component
 const AdminRoute = ({ children }) => {
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  return isAuthenticated() && user.role === 'admin' ? children : <Navigate to="/dashboard" />;
+  return isAuthenticated() && checkAdmin() ? children : <Navigate to="/dashboard" />;
 };
 
 function App() {

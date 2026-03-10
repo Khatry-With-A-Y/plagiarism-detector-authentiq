@@ -1,33 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { submissionsAPI } from '../services/api';
-import ResultCard from './ResultCard';
+import React from 'react';
+import useFetchResults from '../hooks/useFetchResults';
+import ResultCard from '../components/ResultCard';
 
 function ResultsDisplay({ submissionId }) {
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [submission, setSubmission] = useState(null);
-
-  useEffect(() => {
-    if (submissionId) {
-      fetchResults();
-    }
-  }, [submissionId]);
-
-  const fetchResults = async () => {
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await submissionsAPI.getResults(submissionId);
-      setSubmission(response.data);
-      setResults(response.data.results || []);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load results');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { results, submission, loading, error, refresh } = useFetchResults(submissionId);
 
   if (loading) {
     return (
@@ -49,7 +25,7 @@ function ResultsDisplay({ submissionId }) {
     return (
       <div className="card">
         <p>No results available yet. The analysis may still be processing.</p>
-        <button className="btn btn-primary" onClick={fetchResults} style={{ marginTop: '10px' }}>
+        <button className="btn btn-primary" onClick={refresh} style={{ marginTop: '10px' }}>
           Refresh
         </button>
       </div>

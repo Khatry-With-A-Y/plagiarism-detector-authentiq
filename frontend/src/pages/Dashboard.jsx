@@ -1,26 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { submissionsAPI } from '../services/api';
-import { getUser, logout, isAdmin } from '../services/auth';
+import { submissionsAPI } from '../api/results';
+import useAuth from '../hooks/useAuth';
 import FileUpload from './FileUpload';
 import ResultsDisplay from './ResultsDisplay';
 
 function Dashboard() {
-  const [user, setUser] = useState(null);
+  const { user, logout, isAdmin } = useAuth();
   const [submissions, setSubmissions] = useState([]);
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const currentUser = getUser();
-    if (!currentUser) {
+    if (!user) {
       navigate('/login');
       return;
     }
-    setUser(currentUser);
     fetchSubmissions();
-  }, [navigate]);
+  }, [navigate, user]);
 
   const fetchSubmissions = async () => {
     try {
@@ -55,7 +53,7 @@ function Dashboard() {
           <p>Welcome, {user?.username}!</p>
         </div>
         <div>
-          {isAdmin() && (
+          {isAdmin && (
             <button
               className="btn btn-secondary"
               onClick={() => navigate('/admin')}

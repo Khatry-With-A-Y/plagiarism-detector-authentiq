@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { corpusAPI } from '../services/api';
-import { getUser, logout, isAdmin } from '../services/auth';
+import { corpusAPI } from '../api/results';
+import useAuth from '../hooks/useAuth';
 
 function AdminPanel() {
+  const { user, logout, isAdmin } = useAuth();
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -15,12 +16,12 @@ function AdminPanel() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!isAdmin()) {
+    if (!isAdmin) {
       navigate('/dashboard');
       return;
     }
     fetchPapers();
-  }, [navigate]);
+  }, [navigate, isAdmin]);
 
   const fetchPapers = async () => {
     try {
@@ -76,8 +77,6 @@ function AdminPanel() {
       setError(err.response?.data?.error || 'Delete failed');
     }
   };
-
-  const user = getUser();
 
   return (
     <div className="container">

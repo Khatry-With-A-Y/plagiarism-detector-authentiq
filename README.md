@@ -54,11 +54,30 @@ plagiarism-detector-authentiq/
 │       ├── raw_papers/        # corpus files
 │       ├── processed/         # uploaded submissions
 │       └── database.db        # sqlite database file
-├── frontend/                 # React frontend (unchanged)
+├── frontend/                 # React frontend
 │   ├── package.json
 │   └── src/
+│       ├── api/
+│       │   ├── api.js
+│       │   ├── auth.js
+│       │   └── results.js
 │       ├── components/
-│       └── services/
+│       │   └── ResultCard.jsx
+│       ├── hooks/
+│       │   ├── useAuth.js
+│       │   └── useFetchResults.js
+│       ├── pages/
+│       │   ├── AdminPanel.jsx
+│       │   ├── Dashboard.jsx
+│       │   ├── FileUpload.jsx
+│       │   ├── Login.jsx
+│       │   ├── Register.jsx
+│       │   └── ResultsDisplay.jsx
+│       ├── utils/
+│       │   └── auth.js
+│       ├── App.jsx
+│       ├── index.css
+│       └── index.js
 └── README.md
 ```
 
