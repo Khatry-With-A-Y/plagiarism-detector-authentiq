@@ -84,7 +84,7 @@ The frontend will run on `http://localhost:3000`
 
 ## Usage
 
-1. **Register/Login**: Create an account or login to access the platform
+1. **Register/Login**: Create an account or login to access the platform (a default admin user, username/password = `admin`/`admin` is created)
 2. **Upload Document**: Upload your academic paper (.pdf, .doc, .docx)
 3. **Automatic Analysis**: The system automatically processes your document against the corpus
 4. **View Results**: See ranked similarity results with scores and paper details
@@ -124,24 +124,6 @@ Edit `backend/config.py` to customize:
 - Implement rate limiting for production use
 - Add file virus scanning for production
 - Use HTTPS in production
-
-## Development
-
-### Creating an Admin User
-
-To create an admin user, you can modify the database directly or add a script:
-
-```python
-from backend.app.models.models import User
-from backend.app.utils.auth import hash_password
-
-User.create(
-    username='admin',
-    email='admin@example.com',
-    password_hash=hash_password('adminpassword'),
-    role='admin'
-)
-```
 
 ## License
 

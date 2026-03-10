@@ -80,6 +80,19 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_results_score ON similarity_results(similarity_score DESC)')
     
     conn.commit()
+    # seed a default account if none exist
+    from backend.app.models.models import User
+    from backend.app.utils.auth import hash_password
+
+    # check for an admin user, create one if missing
+    if not User.get_by_username('admin'):
+        print('Creating default admin user: admin / admin')
+        password_hash = hash_password('admin')
+        try:
+            User.create('admin', 'admin@example.com', password_hash, role='admin')
+        except ValueError:
+            pass
+
     conn.close()
     print(f"Database initialized at {DATABASE_PATH}")
 
