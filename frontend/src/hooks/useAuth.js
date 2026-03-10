@@ -12,12 +12,14 @@ export default function useAuth() {
   const [user, setUser] = useState(() => getStoredUser());
 
   useEffect(() => {
-    // keep localStorage and state in sync
+    // synchronize once with localStorage on mount
     const stored = getStoredUser();
-    if (stored && stored !== user) {
+    // only update if the stored user differs in content (not just reference)
+    if (stored && JSON.stringify(stored) !== JSON.stringify(user)) {
       setUser(stored);
     }
-  }, [user]);
+    // we intentionally run this only once; further updates go through login/logout
+  }, []);
 
   const login = useCallback(async (username, password) => {
     const res = await apiLogin(username, password);
