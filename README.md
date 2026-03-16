@@ -20,7 +20,7 @@ Authentiq is a full-stack web application for detecting plagiarism in academic p
 - **SQLite** - Database
 - **PyJWT** - JWT authentication
 - **python-docx** - DOCX file processing
-- **PyPDF2/pdfplumber** - PDF file processing
+- **PyMuPDF** - PDF file processing
 - **python-docx2txt** - DOC file processing
 
 ### Frontend

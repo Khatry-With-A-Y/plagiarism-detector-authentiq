@@ -44,24 +44,15 @@ def extract_txt(file_path):
 
 def extract_pdf(file_path):
     """Extract text from .pdf file"""
-    try:
-        import pdfplumber
-        text = ""
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        return text
-    except ImportError:
-        # Fallback to PyPDF2 if pdfplumber is not available
-        import PyPDF2
-        text = ""
-        with open(file_path, 'rb') as f:
-            pdf_reader = PyPDF2.PdfReader(f)
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-        return text
+    import fitz  # pymupdf
+
+    text = ""
+    with fitz.open(file_path) as doc:
+        for page in doc:
+            page_text = page.get_text()
+            if page_text:
+                text += page_text + "\n"
+    return text
 
 
 def extract_docx(file_path):
