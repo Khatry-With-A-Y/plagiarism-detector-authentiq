@@ -81,7 +81,7 @@ python init_db.py
 
 5. Start the Flask server (from project root):
 ```bash
-python backend/run.py
+python backend/run_backend.py
 ```
 
 Backend runs on `http://localhost:5000`
