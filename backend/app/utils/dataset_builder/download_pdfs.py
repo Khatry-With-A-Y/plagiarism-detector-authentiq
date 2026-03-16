@@ -15,7 +15,7 @@ pdf_dir = os.path.join(backend_dir, "data", "raw_papers")
 
 os.makedirs(pdf_dir, exist_ok=True)
 
-WORKERS = 3             # number of parallel download threads
+WORKERS = 10             # number of parallel download threads
 MIN_FILE_SIZE = 50000   # 50KB minimum — anything smaller is likely corrupt or incomplete
 
 # Multiple User-Agents to rotate
