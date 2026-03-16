@@ -41,6 +41,8 @@ cd backend
 python -m venv venv
 # Windows
 venv\Scripts\activate
+# OR macOS/Linux
+source venv/bin/activate
 ``` 
 
 3. Install dependencies:
@@ -50,10 +52,7 @@ pip install -r requirements.txt
 
 4. Initialize the database (database file will be created under `backend/data`):
 ```bash
-python - <<'PY'
-from backend.app.utils.database import init_database
-init_database()
-PY
+python init_db.py
 ```
 
 5. Start the Flask server (from project root):
