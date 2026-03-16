@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 
-from backend.app.models.models import User
-from backend.app.utils.auth import (
+from ..models.models import User
+from ..utils.auth import (
     hash_password, verify_password, generate_token, get_current_user,
     require_auth, require_admin
 )

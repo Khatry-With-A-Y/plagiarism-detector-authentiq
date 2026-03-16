@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from backend.config import DATABASE_PATH
+from ...config import DATABASE_PATH
 
 
 def get_db_connection():
@@ -81,8 +81,8 @@ def init_database():
     
     conn.commit()
     # seed a default account if none exist
-    from backend.app.models.models import User
-    from backend.app.utils.auth import hash_password
+    from ..models.models import User
+    from .auth import hash_password
 
     # check for an admin user, create one if missing
     if not User.get_by_username('admin'):

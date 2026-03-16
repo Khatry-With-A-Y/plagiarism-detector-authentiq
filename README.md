@@ -29,28 +29,52 @@ Authentiq is a full-stack web application for detecting plagiarism in academic p
 
 ## Installation & Setup
 
-### Backend Setup
+### ⚠️ Important Note for Team Members
+**DO NOT use `npm install`** for this project. Always use `npm ci` instead. This ensures everyone has the exact same dependency versions from `package-lock.json`, preventing "works on my machine" issues.
 
-1. From the project root, enter the backend folder (optional):
+### Quick Setup (Automated - Recommended)
+
+**Windows:**
+```bash
+setup.ps1
+```
+#### What the Setup Scripts Do:
+- ✅ Check if backend/frontend servers are running and warn you
+- ✅ Skip steps that are already done (venv, dependencies)
+- ✅ Ask before reinitializing the database if it exists
+- ✅ Install all dependencies automatically
+- ✅ Print clear instructions for starting servers
+
+**Safe to run multiple times!** The scripts are idempotent and won't overwrite existing data.
+
+Then follow the printed instructions to start the servers.
+
+---
+
+### Manual Setup
+
+#### Backend Setup
+
+1. From the project root, enter the backend folder:
 ```bash
 cd backend
 ```
 
-2. Create and activate a virtual environment (recommended):
+2. Create and activate a virtual environment:
 ```bash
 python -m venv venv
 # Windows
 venv\Scripts\activate
 # OR macOS/Linux
 source venv/bin/activate
-``` 
+```
 
 3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Initialize the database (database file will be created under `backend/data`):
+4. Initialize the database:
 ```bash
 python init_db.py
 ```
@@ -60,9 +84,9 @@ python init_db.py
 python backend/run.py
 ```
 
-The backend will run on `http://localhost:5000`
+Backend runs on `http://localhost:5000`
 
-### Frontend Setup
+#### Frontend Setup
 
 1. Navigate to the frontend directory:
 ```bash
@@ -71,7 +95,7 @@ cd frontend
 
 2. Install dependencies:
 ```bash
-npm install
+npm ci  # [DO NOT USE: npm install - use 'npm ci' for reproducible installs]
 ```
 
 3. Start the development server:
@@ -79,7 +103,7 @@ npm install
 npm start
 ```
 
-The frontend will run on `http://localhost:3000`
+Frontend runs on `http://localhost:3000`
 
 ## Usage
 

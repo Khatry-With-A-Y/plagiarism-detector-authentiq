@@ -1,6 +1,6 @@
 import sqlite3
 from datetime import datetime
-from backend.app.utils.database import get_db_connection
+from ..utils.database import get_db_connection
 
 
 class User:

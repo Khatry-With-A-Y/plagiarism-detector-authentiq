@@ -3,13 +3,13 @@ from werkzeug.utils import secure_filename
 from pathlib import Path
 from datetime import datetime
 
-from backend.config import (
+from ...config import (
     UPLOAD_FOLDER, CORPUS_FOLDER, MAX_FILE_SIZE, ALLOWED_EXTENSIONS
 )
-from backend.app.models.models import User, Paper, Submission, SimilarityResult
-from backend.app.utils.auth import get_current_user, require_auth, require_admin
-from backend.app.utils.file_processor import extract_text, validate_file
-from backend.app.utils.cosine import process_submission as compute_similarity
+from ..models.models import User, Paper, Submission, SimilarityResult
+from ..utils.auth import get_current_user, require_auth, require_admin
+from ..utils.file_processor import extract_text, validate_file
+from ..utils.cosine import process_submission as compute_similarity
 
 papers_bp = Blueprint('papers', __name__, url_prefix='/api')
 
