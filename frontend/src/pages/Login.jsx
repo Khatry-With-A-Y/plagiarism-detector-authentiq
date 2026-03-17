@@ -1,8 +1,31 @@
-import React from "react";
-import { Link } from "react-router-dom";
+import React, { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import useAuth from "../hooks/useAuth";
 import "./auth.css";
 
 function Login() {
+  const navigate = useNavigate();
+  const { login } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      await login(username, password);
+      navigate("/dashboard");
+    } catch (err) {
+      setError(err.response?.data?.error || "Login failed. Please check your credentials.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="auth-page">
       <div className="auth-card-wrapper">
@@ -18,11 +41,20 @@ function Login() {
           <p>Log in to verify document originality and manage your reports.</p>
         </div>
 
-        <form className="auth-form" onSubmit={(e) => e.preventDefault()}>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          {error && <div className="form-error">{error}</div>}
           <div className="form-group">
-            <label className="form-label">Email</label>
+            <label className="form-label">Username</label>
             <div className="input-wrapper">
-              <input type="email" className="auth-input-field" />
+              <input
+                type="text"
+                className="auth-input-field"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter your username"
+                autoComplete="username"
+                required
+              />
             </div>
           </div>
 
@@ -32,7 +64,15 @@ function Login() {
               <a href="#" className="forgot-link">Forgot password?</a>
             </div>
             <div className="input-wrapper">
-              <input type="password" placeholder="••••••••" className="auth-input-field" />
+              <input
+                type="password"
+                placeholder="••••••••"
+                className="auth-input-field"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
             </div>
           </div>
 
@@ -43,7 +83,9 @@ function Login() {
             </label>
           </div>
 
-          <button className="auth-submit-btn">Sign In</button>
+          <button className="auth-submit-btn" type="submit" disabled={loading}>
+            {loading ? "Signing in..." : "Sign In"}
+          </button>
 
           <div className="info-box">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
