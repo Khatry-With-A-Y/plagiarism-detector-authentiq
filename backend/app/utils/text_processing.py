@@ -1,7 +1,29 @@
 import re
+import nltk
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import wordnet
+
+# Download required NLTK data (only downloads if not present)
+def _ensure_nltk_data():
+    """Download required NLTK data packages if not already present."""
+    required_packages = [
+        ('corpora/wordnet', 'wordnet'),
+        ('corpora/omw-1.4', 'omw-1.4'),
+    ]
+    for path, package in required_packages:
+        try:
+            nltk.data.find(path)
+        except LookupError:
+            nltk.download(package, quiet=True)
+
+_ensure_nltk_data()
+
 
 class TextProcessor:
-    """Handles text cleaning and preprocessing"""
+    """Handles text cleaning and preprocessing with tokenization, stopword removal, and lemmatization"""
+
+    # Shared lemmatizer instance
+    _lemmatizer = WordNetLemmatizer()
 
     # Common English stopwords
     STOPWORDS = {
@@ -16,24 +38,38 @@ class TextProcessor:
         'than', 'too', 'very', 'just', 'also', 'now', 'here', 'there', 'then'
     }
 
-    @staticmethod
-    def simple_stem(word):
-        """Very basic stemming without external libraries"""
-        if word.endswith('s'):   return word[:-1]
-        if word.endswith('es'):  return word[:-2]
-        if word.endswith('ing'): return word[:-3]
-        if word.endswith('ed'):  return word[:-2]
-        return word
+    @classmethod
+    def lemmatize(cls, word):
+        """
+        Lemmatize a word to its base/dictionary form.
+        Tries verb form first, then noun form for best results.
+        Examples: 'running' -> 'run', 'studies' -> 'study', 'better' -> 'better'
+        """
+        # Try as verb first (handles running->run, studies->study)
+        lemma = cls._lemmatizer.lemmatize(word, pos='v')
+        if lemma != word:
+            return lemma
+        # Fall back to noun form (handles cats->cat, children->child)
+        return cls._lemmatizer.lemmatize(word, pos='n')
 
-    @staticmethod
-    def clean_text(text, remove_stopwords=False):
-        """Clean and preprocess text: lowercase, remove punctuation, simple stem"""
+    @classmethod
+    def clean_text(cls, text, remove_stopwords=False):
+        """
+        Clean and preprocess text with tokenization, optional stopword removal, and lemmatization.
+
+        Steps:
+        1. Lowercase the text
+        2. Remove non-letter characters (punctuation, numbers)
+        3. Tokenize by splitting on whitespace
+        4. Lemmatize each token to its base form
+        5. Optionally remove stopwords
+        """
         text = text.lower()
         text = re.sub(r'[^a-z\s]', '', text)  # remove non-letter characters
-        words = text.split()
-        words = [TextProcessor.simple_stem(w) for w in words if w]
+        words = text.split()  # tokenization
+        words = [cls.lemmatize(w) for w in words if w]  # lemmatization
         if remove_stopwords:
-            words = [w for w in words if w not in TextProcessor.STOPWORDS]
+            words = [w for w in words if w not in cls.STOPWORDS]
         return words
 
     @staticmethod
