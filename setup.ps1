@@ -35,7 +35,7 @@ try {
 Write-Host ""
 
 # Check if backend is running
-$backendRunning = (netstat -ano 2>$null | Select-String ":5000.*LISTEN") -ne $null
+$backendRunning = $null -ne (netstat -ano 2>$null | Select-String ":5000.*LISTEN")
 if ($backendRunning) {
     Write-Host "WARNING: Backend appears to be running on http://localhost:5000" -ForegroundColor Yellow
     Write-Host "Please stop the backend before running setup (Ctrl+C in backend terminal)"
@@ -46,7 +46,7 @@ if ($backendRunning) {
 }
 
 # Check if frontend is running
-$frontendRunning = (netstat -ano 2>$null | Select-String ":3000.*LISTEN") -ne $null
+$frontendRunning = $null -ne (netstat -ano 2>$null | Select-String ":3000.*LISTEN") 
 if ($frontendRunning) {
     Write-Host "WARNING: Frontend appears to be running on http://localhost:3000" -ForegroundColor Yellow
     Write-Host "Please stop the frontend before running setup (Ctrl+C in frontend terminal)"
@@ -134,6 +134,29 @@ if (Test-Path "data\database.db") {
     python init_db.py
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to initialize database" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# ── Step 5.5: Ingest corpus into database ───────────────────────────
+$pdfCount = (Get-ChildItem "data\raw_papers\*.pdf" -ErrorAction SilentlyContinue | Measure-Object).Count
+
+if ($pdfCount -ge 300) {
+    Write-Host "[5.5/6] Corpus already ingested ($pdfCount PDFs found)" -ForegroundColor Cyan
+    $reingest = Read-Host "  Re-ingest corpus? (y/n)"
+    if ($reingest -eq "y" -or $reingest -eq "Y") {
+        python app/utils/dataset_builder/ingest_papers.py
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] Failed to ingest corpus" -ForegroundColor Red
+            exit 1
+        }
+    }
+} else {
+    Write-Host "[5.5/6] Ingesting corpus into database..." -ForegroundColor Cyan
+    Write-Host "  This may take several minutes depending on corpus size..." -ForegroundColor Gray
+    python app/utils/dataset_builder/ingest_papers.py
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to ingest corpus" -ForegroundColor Red
         exit 1
     }
 }

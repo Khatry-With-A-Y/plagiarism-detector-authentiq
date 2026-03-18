@@ -75,7 +75,7 @@ def is_blocked(url):
 
 TARGET = 600            # fetch more than needed to reduce top-up reliance
 ACTUAL_GOAL = 500       # the real number of papers you want — used for warning/success messages
-WORKERS = 3             # number of parallel threads — keep low to avoid API rate limiting
+WORKERS = 7 #3            # number of parallel threads — keep low to avoid API rate limiting
 MAX_SERVER_ERRORS = 5   # how many consecutive 500 errors before giving up on a query
 
 papers = []         # final collected papers across all queries
@@ -94,7 +94,7 @@ def fetch_query(query, query_target, verbose=True):
 
     params = {
         "query": query,
-        "fields": "paperId,title,year,openAccessPdf,fieldsOfStudy"
+        "fields": "paperId,title,year,openAccessPdf,fieldsOfStudy,authors"
     }
 
     while collected < query_target:
@@ -164,6 +164,7 @@ def fetch_query(query, query_target, verbose=True):
                 "paperId": paper_id,
                 "title": paper.get("title"),
                 "year": paper.get("year"),
+                "authors": paper.get("authors"),
                 "pdf_url": pdf_url,
                 "field": query  # which query this paper came from
             })

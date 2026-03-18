@@ -39,11 +39,14 @@ Authentiq is a full-stack web application for detecting plagiarism in academic p
 setup.ps1
 ```
 #### What the Setup Scripts Do:
-- ✅ Check if backend/frontend servers are running and warn you
-- ✅ Skip steps that are already done (venv, dependencies)
-- ✅ Ask before reinitializing the database if it exists
-- ✅ Install all dependencies automatically
-- ✅ Print clear instructions for starting servers
+- Check if backend/frontend servers are running and warn you
+- Skip steps that are already done (venv, dependencies)
+- Ask before reinitializing the database if it exists
+- Install all dependencies automatically
+- Download the corpus PDFs from GitHub (~1.2 GB, skipped if already present)
+- Initialize the database (or prompt before reinitializing)
+- **Automatically ingest the corpus into the database** (populates papers for plagiarism comparison)
+- Print clear instructions for starting servers
 
 **Safe to run multiple times!** The scripts are idempotent and won't overwrite existing data.
 
@@ -79,7 +82,13 @@ pip install -r requirements.txt
 python init_db.py
 ```
 
-5. Start the Flask server (from project root):
+5. **Ingest the corpus into the database** (required for plagiarism comparison):
+```bash
+python app/utils/dataset_builder/ingest_papers.py
+```
+⚠️ **Note**: The corpus PDFs must be present in `backend/data/raw_papers/` before ingesting. If not available, download them following the instructions below.
+
+6. Start the Flask server (from project root):
 ```bash
 python backend/run_backend.py
 ```
@@ -104,6 +113,20 @@ npm start
 ```
 
 Frontend runs on `http://localhost:3000`
+
+#### Corpus Download (Manual)
+
+If you need to download the corpus PDFs manually (or the automatic download in setup failed):
+
+1. Download from the [GitHub Release](https://github.com/Khatry-With-A-Y/plagiarism-detector-authentiq/releases/tag/Authentiq-Raw-PDFs)
+2. Extract the zip file to `backend/data/raw_papers/`
+3. Run the ingestion script:
+```bash
+cd backend
+python app/utils/dataset_builder/ingest_papers.py
+```
+
+The ingestion script is **idempotent** - it safely skips papers already in the database, so you can run it multiple times.
 
 ## Usage
 
