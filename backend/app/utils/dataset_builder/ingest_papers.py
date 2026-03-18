@@ -6,6 +6,7 @@ Usage (from project root):
 
 Idempotent: safe to re-run. Papers already in the database are skipped.
 Enriches metadata from Semantic Scholar API when local metadata is missing.
+Uses multiprocessing for parallel PDF extraction.
 """
 
 import os
@@ -13,6 +14,7 @@ import sys
 import json
 import time
 import requests
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ── Path setup (same pattern as download_pdfs.py) ──────────────────────
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +28,7 @@ from backend.app.utils.database import get_db_connection, init_database
 
 # ── Configuration ──────────────────────────────────────────────────────
 ADMIN_USER_ID = 1
+WORKERS = 8  # Number of parallel workers for PDF extraction
 json_path = os.path.join(backend_dir, "data", "raw_papers", "cs_papers.json")
 pdf_dir = os.path.join(backend_dir, "data", "raw_papers")
 
@@ -57,6 +60,20 @@ def get_existing_filenames():
     filenames = {row['filename'] for row in cursor.fetchall()}
     conn.close()
     return filenames
+
+
+def extract_single_pdf(args):
+    """Worker function: extract text from a single PDF. Runs in separate process."""
+    filename, pdf_path = args
+    try:
+        # Use fast_mode=True for remaining stubborn PDFs that hang column_boxes
+        content_text = extract_text(pdf_path, '.pdf', fast_mode=True)
+        if content_text and content_text.strip():
+            return {'filename': filename, 'content': content_text, 'error': None}
+        else:
+            return {'filename': filename, 'content': None, 'error': 'empty'}
+    except Exception as e:
+        return {'filename': filename, 'content': None, 'error': str(e)[:100]}
 
 
 def ingest():
@@ -97,33 +114,46 @@ def ingest():
     print(f"  Metadata entries:     {len(papers_meta)}")
     print(f"  Already in database:  {len(existing)}")
     print(f"  To ingest:            {len(pending)}")
+    print(f"  Workers:              {WORKERS}")
     print(f"{'='*40}\n")
 
     if not pending:
         print("All papers already ingested. Nothing to do.")
         return
 
-    # Process each pending PDF
+    # Prepare work items
+    work_items = [(f, os.path.join(pdf_dir, f)) for f in pending]
+
+    # Counters
     success = 0
     failed = 0
     skipped_empty = 0
     api_enriched = 0
+    processed = 0
     start_time = time.time()
 
-    for i, filename in enumerate(pending, 1):
-        pdf_path = os.path.join(pdf_dir, filename)
+    # Helper to process a single result
+    def process_result(result, meta_lookup):
+        nonlocal success, failed, skipped_empty, api_enriched
+
+        filename = result['filename']
         paper_id_str = os.path.splitext(filename)[0]
 
-        # Look up metadata from local JSON first
+        if result['error'] == 'empty':
+            skipped_empty += 1
+            return
+        elif result['error']:
+            failed += 1
+            print(f"  FAIL: {filename} -- {result['error']}")
+            return
+
+        # Get metadata
         meta = meta_lookup.get(paper_id_str, {})
         title = meta.get('title')
         authors = meta.get('authors', [])
 
-        # Check if metadata is incomplete (missing title or authors)
-        needs_enrichment = not title or not authors
-
-        if needs_enrichment:
-            # Try to fetch from Semantic Scholar API
+        # Enrich if needed
+        if not title or not authors:
             api_meta = fetch_paper_metadata(paper_id_str)
             if api_meta:
                 if not title:
@@ -131,46 +161,57 @@ def ingest():
                 if not authors:
                     authors = api_meta.get('authors', [])
                 api_enriched += 1
-                time.sleep(0.3)  # be polite to the API
+                time.sleep(0.3)
 
         # Final fallbacks
         if not title:
             title = paper_id_str
         author_str = ", ".join([a.get('name', 'Unknown') for a in authors]) if authors else "Unknown"
 
+        # Insert into database
         try:
-            content_text = extract_text(pdf_path, '.pdf')
-
-            if not content_text or not content_text.strip():
-                skipped_empty += 1
-                print(f"  [{i}/{len(pending)}] SKIP (no text): {filename}")
-                continue
-
-            # Insert into database
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute(
                 '''INSERT INTO papers (title, author, filename, file_path, content_text, uploaded_by)
                    VALUES (?, ?, ?, ?, ?, ?)''',
-                (title, author_str, filename, pdf_path, content_text, ADMIN_USER_ID)
+                (title, author_str, filename, os.path.join(pdf_dir, filename), result['content'], ADMIN_USER_ID)
             )
             conn.commit()
             conn.close()
-
             success += 1
-
         except Exception as e:
             failed += 1
-            print(f"  [{i}/{len(pending)}] FAIL: {filename} -- {str(e)[:100]}")
+            print(f"  DB FAIL: {filename} -- {str(e)[:100]}")
 
-        # Progress report every 10 papers and at the end
-        if i % 10 == 0 or i == len(pending):
-            elapsed = time.time() - start_time
-            rate = i / elapsed if elapsed > 0 else 0
-            eta = (len(pending) - i) / rate if rate > 0 else 0
-            print(f"  Progress: {i}/{len(pending)} | "
-                  f"{success} OK, {api_enriched} enriched, {failed} failed, {skipped_empty} empty | "
-                  f"{elapsed:.0f}s elapsed, ~{eta:.0f}s remaining")
+    # Use single-threaded for small batches, parallel for large
+    if len(pending) < 10:
+        print(f"  Processing {len(pending)} files sequentially...")
+        for item in work_items:
+            result = extract_single_pdf(item)
+            processed += 1
+            process_result(result, meta_lookup)
+            print(f"  Progress: {processed}/{len(pending)} | {success} OK, {failed} failed")
+    else:
+        print(f"  Starting parallel extraction with {WORKERS} workers...")
+        with ProcessPoolExecutor(max_workers=WORKERS) as executor:
+            future_to_filename = {
+                executor.submit(extract_single_pdf, item): item[0]
+                for item in work_items
+            }
+
+            for future in as_completed(future_to_filename):
+                processed += 1
+                result = future.result()
+                process_result(result, meta_lookup)
+
+                if processed % 10 == 0 or processed == len(pending):
+                    elapsed = time.time() - start_time
+                    rate = processed / elapsed if elapsed > 0 else 0
+                    eta = (len(pending) - processed) / rate if rate > 0 else 0
+                    print(f"  Progress: {processed}/{len(pending)} | "
+                          f"{success} OK, {api_enriched} enriched, {failed} failed, {skipped_empty} empty | "
+                          f"{elapsed:.0f}s elapsed, ~{eta:.0f}s remaining")
 
     elapsed = time.time() - start_time
     print(f"\n{'='*40}")

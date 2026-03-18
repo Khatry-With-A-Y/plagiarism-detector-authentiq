@@ -1,31 +1,31 @@
-import os
 from pathlib import Path
 
-def extract_text(file_path, file_type=None):
+def extract_text(file_path, file_type=None, fast_mode=False):
     """
     Extract text from various document formats.
-    
+
     Args:
         file_path: Path to the file
         file_type: Optional file extension (e.g., '.pdf', '.docx')
                    If not provided, will be inferred from file_path
-    
+        fast_mode: If True, use faster but less accurate extraction (for bulk processing)
+
     Returns:
         str: Extracted text content
     """
     if file_type is None:
         file_type = Path(file_path).suffix.lower()
-    
+
     file_path = Path(file_path)
-    
+
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
-    
+
     try:
         if file_type == '.txt':
             return extract_txt(file_path)
         elif file_type == '.pdf':
-            return extract_pdf(file_path)
+            return extract_pdf(file_path, fast_mode=fast_mode)
         elif file_type == '.docx':
             return extract_docx(file_path)
         elif file_type == '.doc':
@@ -42,17 +42,42 @@ def extract_txt(file_path):
         return f.read()
 
 
-def extract_pdf(file_path):
-    """Extract text from .pdf file"""
+def extract_pdf(file_path, fast_mode=False):
+    """
+    Extract text from .pdf file.
+
+    Args:
+        file_path: Path to the PDF file
+        fast_mode: If True, use simple extraction (fast, good for bulk processing)
+                   If False, use column_boxes for accurate multi-column handling
+    """
     import fitz  # pymupdf
 
-    text = ""
+    full_text = []
+
     with fitz.open(file_path) as doc:
         for page in doc:
-            page_text = page.get_text()
-            if page_text:
-                text += page_text + "\n"
-    return text
+            if fast_mode:
+                # Fast mode: simple text extraction with basic sorting
+                text = page.get_text("text", sort=True)
+                if text and text.strip():
+                    full_text.append(text.strip())
+            else:
+                # Accurate mode: use column_boxes with fallback
+                try:
+                    from .multi_column import column_boxes
+                    bboxes = column_boxes(page, footer_margin=50, header_margin=50)
+                    for rect in bboxes:
+                        text = page.get_text(clip=rect, sort=True)
+                        if text and text.strip():
+                            full_text.append(text.strip())
+                except Exception:
+                    # Fallback to simple extraction if column_boxes fails
+                    text = page.get_text("text", sort=True)
+                    if text and text.strip():
+                        full_text.append(text.strip())
+
+    return "\n".join(full_text)
 
 
 def extract_docx(file_path):

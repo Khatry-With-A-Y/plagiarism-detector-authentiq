@@ -36,12 +36,12 @@ class SimilarityEngine:
             return []
         
         # Preprocess submission
-        submission_words = self.text_processor.clean_text(submission_text)
+        submission_words = self.text_processor.preprocess_for_tfidf(submission_text)
         
         # Preprocess all corpus documents
         corpus_words_list = []
         for paper_id, text in corpus_texts:
-            words = self.text_processor.clean_text(text)
+            words = self.text_processor.preprocess_for_tfidf(text)
             corpus_words_list.append((paper_id, words))
         
         # Build shared vocabulary from corpus + submission
