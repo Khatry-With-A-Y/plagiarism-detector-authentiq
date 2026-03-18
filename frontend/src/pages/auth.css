@@ -11,6 +11,30 @@
   background-color: #f1f2f5;
   padding: 40px 20px;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  position: relative;
+}
+
+.back-btn {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background-color: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.2s;
+}
+
+.back-btn:hover {
+  background-color: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
 }
 
 .auth-card-wrapper {
@@ -91,6 +115,7 @@
   color: #2563eb;
   text-decoration: none;
   font-weight: 500;
+  align-self: flex-end;
 }
 .forgot-link:hover {
   text-decoration: underline;

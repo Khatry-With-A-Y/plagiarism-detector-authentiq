@@ -72,25 +72,73 @@ function Landing() {
       {/* FEATURES */}
       <section className="features">
 
-        <h2>Designed for the Modern Scholar</h2>
+        <div className="features-grid">
+          <div className="features-left">
+            <h2>Designed for the Modern Scholar</h2>
 
-        <div className="feature-grid">
+            <p>
+              Authentiq was born from the belief that academic integrity tools
+              shouldn’t be complex or intrusive. We bridge the gap between
+              rigorous analysis and effortless user experience, ensuring that
+              every writer has access to top-tier verification technology.
+            </p>
 
-          <div className="feature-card">
-            <h4>Deep Analysis</h4>
-            <p>Scan documents against academic databases and web sources.</p>
+            <div className="feature-highlights">
+              <div className="highlight">
+                <div className="highlight-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    <path d="M9 12l2 2 4-4" />
+                  </svg>
+                </div>
+                <div>
+                  <h4>Privacy Focused</h4>
+                  <p>We never store or share your full documents without consent.</p>
+                </div>
+              </div>
+
+              <div className="highlight">
+                <div className="highlight-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M12 4h9" />
+                    <path d="M4 8h16" />
+                    <path d="M4 16h16" />
+                    <path d="M8 4v16" />
+                    <path d="M16 4v16" />
+                  </svg>
+                </div>
+                <div>
+                  <h4>Academic Standards</h4>
+                  <p>Built to support citation quality and research ethics.</p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="feature-card">
-            <h4>Accurate Reports</h4>
-            <p>Detailed similarity reports with highlighted matches.</p>
-          </div>
+          <div className="mission-card">
+            <div className="mission-header">
+              <div className="mission-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  <path d="M9 12l2 2 4-4" />
+                </svg>
+              </div>
+              <div>
+                <h3>Our Mission &amp; Privacy</h3>
+                <p className="mission-subtitle">
+                  Your intellectual property is sacred. Our mission is to provide secure, private checks for academic papers without ever compromising your ownership.
+                </p>
+              </div>
+            </div>
 
-          <div className="feature-card">
-            <h4>Fast Results</h4>
-            <p>Get plagiarism reports in seconds.</p>
+            <ul className="mission-list">
+              <li>Transparent data management practices</li>
+              <li>Secure document handling pipelines</li>
+              <li>No sharing with global search databases</li>
+              <li>Optional data contributions by willing users</li>
+            </ul>
           </div>
-
         </div>
 
       </section>
