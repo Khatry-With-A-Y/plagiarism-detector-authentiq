@@ -5,12 +5,14 @@ Usage (from project root):
     python backend/app/utils/dataset_builder/ingest_papers.py
 
 Idempotent: safe to re-run. Papers already in the database are skipped.
+Enriches metadata from Semantic Scholar API when local metadata is missing.
 """
 
 import os
 import sys
 import json
 import time
+import requests
 
 # ── Path setup (same pattern as download_pdfs.py) ──────────────────────
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +28,25 @@ from backend.app.utils.database import get_db_connection, init_database
 ADMIN_USER_ID = 1
 json_path = os.path.join(backend_dir, "data", "raw_papers", "cs_papers.json")
 pdf_dir = os.path.join(backend_dir, "data", "raw_papers")
+
+# Semantic Scholar API for metadata enrichment
+S2_API_KEY = "oJ1QzmqNMN2TArRaxaZs54MRYSKjVTAV5PkGmrCY"
+S2_API_URL = "https://api.semanticscholar.org/graph/v1/paper/"
+S2_HEADERS = {"x-api-key": S2_API_KEY}
+
+
+def fetch_paper_metadata(paper_id):
+    """Fetch metadata from Semantic Scholar API for a single paper."""
+    try:
+        url = f"{S2_API_URL}{paper_id}?fields=title,authors,year"
+        response = requests.get(url, headers=S2_HEADERS, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 429:
+            time.sleep(5)  # rate limited, wait and return None
+        return None
+    except requests.RequestException:
+        return None
 
 
 def get_existing_filenames():
@@ -86,16 +107,35 @@ def ingest():
     success = 0
     failed = 0
     skipped_empty = 0
+    api_enriched = 0
     start_time = time.time()
 
     for i, filename in enumerate(pending, 1):
         pdf_path = os.path.join(pdf_dir, filename)
         paper_id_str = os.path.splitext(filename)[0]
 
-        # Look up metadata
+        # Look up metadata from local JSON first
         meta = meta_lookup.get(paper_id_str, {})
-        title = meta.get('title', paper_id_str)
+        title = meta.get('title')
         authors = meta.get('authors', [])
+
+        # Check if metadata is incomplete (missing title or authors)
+        needs_enrichment = not title or not authors
+
+        if needs_enrichment:
+            # Try to fetch from Semantic Scholar API
+            api_meta = fetch_paper_metadata(paper_id_str)
+            if api_meta:
+                if not title:
+                    title = api_meta.get('title')
+                if not authors:
+                    authors = api_meta.get('authors', [])
+                api_enriched += 1
+                time.sleep(0.3)  # be polite to the API
+
+        # Final fallbacks
+        if not title:
+            title = paper_id_str
         author_str = ", ".join([a.get('name', 'Unknown') for a in authors]) if authors else "Unknown"
 
         try:
@@ -129,17 +169,18 @@ def ingest():
             rate = i / elapsed if elapsed > 0 else 0
             eta = (len(pending) - i) / rate if rate > 0 else 0
             print(f"  Progress: {i}/{len(pending)} | "
-                  f"{success} OK, {failed} failed, {skipped_empty} empty | "
+                  f"{success} OK, {api_enriched} enriched, {failed} failed, {skipped_empty} empty | "
                   f"{elapsed:.0f}s elapsed, ~{eta:.0f}s remaining")
 
     elapsed = time.time() - start_time
     print(f"\n{'='*40}")
     print(f"  Ingest Complete")
     print(f"{'='*40}")
-    print(f"  Ingested:      {success}")
-    print(f"  Failed:        {failed}")
-    print(f"  Skipped empty: {skipped_empty}")
-    print(f"  Time:          {elapsed:.1f}s")
+    print(f"  Ingested:       {success}")
+    print(f"  API enriched:   {api_enriched}")
+    print(f"  Failed:         {failed}")
+    print(f"  Skipped empty:  {skipped_empty}")
+    print(f"  Time:           {elapsed:.1f}s")
     print(f"{'='*40}")
 
 
