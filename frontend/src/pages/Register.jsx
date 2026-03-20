@@ -7,17 +7,18 @@ function Register() {
 
   return (
     <div className="auth-page">
-      <button className="back-btn" onClick={() => navigate("/login")} aria-label="Go back">
+      <button className="back-btn" onClick={() => navigate("/")} aria-label="Go back">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="19" y1="12" x2="5" y2="12"></line>
           <polyline points="12 19 5 12 12 5"></polyline>
         </svg>
       </button>
+
       <div className="auth-card-wrapper">
         <div className="auth-header">
           <div className="auth-logo-container">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="#1a4cd2" />
+              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="#1e40af" />
               <path d="M9 12l2 2 4-4" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <span className="auth-logo-text">Authentiq</span>
@@ -34,7 +35,7 @@ function Register() {
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                 <circle cx="12" cy="7" r="4"></circle>
               </svg>
-              <input type="text" className="auth-input-field has-icon" />
+              <input type="text" className="auth-input-field has-icon" placeholder="Enter your full name" />
             </div>
           </div>
 
@@ -45,7 +46,7 @@ function Register() {
                 <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
                 <polyline points="22,6 12,13 2,6"></polyline>
               </svg>
-              <input type="email" className="auth-input-field has-icon" />
+              <input type="email" className="auth-input-field has-icon" placeholder="Enter your email" />
             </div>
           </div>
 
@@ -80,7 +81,7 @@ function Register() {
 
           <button className="auth-submit-btn">
             Create Account
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginLeft: '4px'}}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="5" y1="12" x2="19" y2="12"></line>
               <polyline points="12 5 19 12 12 19"></polyline>
             </svg>
@@ -93,6 +94,15 @@ function Register() {
           Already have an account? <Link to="/login">Log in here</Link>
         </div>
       </div>
+
+      <footer className="auth-page-footer">
+        <div className="auth-footer-links">
+          <a href="#">Help Center</a>
+          <a href="#">Privacy Policy</a>
+          <a href="#">Terms of Use</a>
+        </div>
+        <p className="auth-footer-copyright">© 2026 Authentiq</p>
+      </footer>
     </div>
   );
 }

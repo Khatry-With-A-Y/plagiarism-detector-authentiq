@@ -84,18 +84,47 @@ def get_submissions():
     """Get user's submission history"""
     user = get_current_user()
     submissions = Submission.get_by_user(user['id'])
-    
-    return jsonify({
-        'submissions': [
-            {
-                'id': s['id'],
-                'filename': s['filename'],
-                'status': s['status'],
-                'uploaded_at': s['uploaded_at']
-            }
-            for s in submissions
-        ]
-    }), 200
+
+    result = []
+    for s in submissions:
+        # Get max similarity score for this submission
+        results = SimilarityResult.get_by_submission(s['id'])
+        max_similarity = max((r['similarity_score'] for r in results), default=0) if results else 0
+
+        result.append({
+            'id': s['id'],
+            'filename': s['filename'],
+            'status': s['status'],
+            'uploaded_at': s['uploaded_at'],
+            'similarity_score': round(max_similarity * 100, 2)  # Convert to percentage
+        })
+
+    return jsonify({'submissions': result}), 200
+
+
+@papers_bp.route('/submissions/<int:submission_id>', methods=['DELETE'])
+@require_auth
+def delete_submission(submission_id):
+    """Delete a submission"""
+    user = get_current_user()
+    submission = Submission.get_by_id(submission_id)
+
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+
+    # Check ownership (unless admin)
+    if submission['user_id'] != user['id'] and user['role'] != 'admin':
+        return jsonify({'error': 'Access denied'}), 403
+
+    # Delete file if exists
+    file_path = Path(submission['file_path'])
+    if file_path.exists():
+        file_path.unlink()
+
+    # Delete from database (results will be deleted via cascade in model)
+    Submission.delete(submission_id)
+
+    return jsonify({'message': 'Submission deleted successfully'}), 200
 
 
 @papers_bp.route('/submissions/<int:submission_id>/results', methods=['GET'])

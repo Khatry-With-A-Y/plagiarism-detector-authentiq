@@ -34,11 +34,12 @@ function Login() {
           <polyline points="12 19 5 12 12 5"></polyline>
         </svg>
       </button>
+
       <div className="auth-card-wrapper">
         <div className="auth-header">
           <div className="auth-logo-container">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="#1a4cd2" />
+              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="#1e40af" />
               <path d="M9 12l2 2 4-4" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <span className="auth-logo-text">Authentiq</span>
@@ -49,6 +50,7 @@ function Login() {
 
         <form className="auth-form" onSubmit={handleSubmit}>
           {error && <div className="form-error">{error}</div>}
+
           <div className="form-group">
             <label className="form-label">Username</label>
             <div className="input-wrapper">
@@ -57,7 +59,7 @@ function Login() {
                 className="auth-input-field"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
+                placeholder=""
                 autoComplete="username"
                 required
               />
@@ -77,9 +79,8 @@ function Login() {
                 required
               />
             </div>
+            <a href="#" className="forgot-link">Forgot password?</a>
           </div>
-
-          <a href="#" className="forgot-link">Forgot password?</a>
 
           <div className="checkbox-container">
             <input type="checkbox" id="remember" />
@@ -90,6 +91,12 @@ function Login() {
 
           <button className="auth-submit-btn" type="submit" disabled={loading}>
             {loading ? "Signing in..." : "Sign In"}
+            {!loading && (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            )}
           </button>
 
           <div className="info-box">
@@ -111,8 +118,8 @@ function Login() {
         </div>
       </div>
 
-      <div className="page-footer">
-        <div className="footer-links">
+      <footer className="auth-page-footer">
+        <div className="auth-footer-links">
           <a href="#">Privacy Policy</a>
           <a href="#">Terms of Service</a>
         </div>
@@ -123,7 +130,7 @@ function Login() {
           </svg>
           SECURE ACADEMIC ENVIRONMENT
         </div>
-      </div>
+      </footer>
     </div>
   );
 }

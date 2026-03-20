@@ -160,6 +160,20 @@ class Submission:
         conn.commit()
         conn.close()
 
+    @staticmethod
+    def delete(submission_id):
+        """Delete a submission and its results"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Delete similarity results first
+        cursor.execute('DELETE FROM similarity_results WHERE submission_id = ?', (submission_id,))
+        # Delete submission
+        cursor.execute('DELETE FROM submissions WHERE id = ?', (submission_id,))
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted
+
 
 class SimilarityResult:
     @staticmethod

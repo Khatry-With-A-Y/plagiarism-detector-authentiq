@@ -1,9 +1,7 @@
 import api from './api';
 
 export const submissionsAPI = {
-  upload: (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
+  upload: (formData) => {
     return api.post('/submissions/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -14,6 +12,8 @@ export const submissionsAPI = {
   getResults: (submissionId) => api.get(`/submissions/${submissionId}/results`),
 
   process: (submissionId) => api.post(`/process/${submissionId}`),
+
+  delete: (submissionId) => api.delete(`/submissions/${submissionId}`),
 };
 
 export const corpusAPI = {
