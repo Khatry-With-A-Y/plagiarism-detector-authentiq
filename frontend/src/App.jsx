@@ -6,6 +6,8 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Results from './pages/Results';
+import AdminStatistics from './pages/AdminStatistics';
+import UserStatistics from './pages/UserStatistics';
 import AdminPanel from './pages/AdminPanel';
 import './index.css';
 
@@ -39,6 +41,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <Results />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/statistics"
+            element={
+              <AdminRoute>
+                <AdminStatistics />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/my-statistics"
+            element={
+              <ProtectedRoute>
+                <UserStatistics />
               </ProtectedRoute>
             }
           />

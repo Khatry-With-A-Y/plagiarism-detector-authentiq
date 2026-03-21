@@ -8,7 +8,7 @@ function FileUpload({ onUploadSuccess }) {
   const [success, setSuccess] = useState('');
 
   const allowedTypes = ['.txt', '.pdf', '.doc', '.docx'];
-  const maxSize = 10 * 1024 * 1024; // 10MB
+  const maxSize = 100 * 1024 * 1024; // 100MB
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -29,7 +29,7 @@ function FileUpload({ onUploadSuccess }) {
 
     // Check file size
     if (selectedFile.size > maxSize) {
-      setError(`File size exceeds 10MB limit`);
+      setError(`File size exceeds 100MB limit`);
       setFile(null);
       return;
     }
@@ -68,7 +68,7 @@ function FileUpload({ onUploadSuccess }) {
       <h3 style={{ marginBottom: '20px' }}>Upload Document for Analysis</h3>
       <form onSubmit={handleSubmit}>
         <div className="form-group">
-          <label>Select File (.txt, .pdf, .doc, .docx - Max 10MB)</label>
+          <label>Select File (.txt, .pdf, .doc, .docx - Max 100MB)</label>
           <input
             type="file"
             onChange={handleFileChange}

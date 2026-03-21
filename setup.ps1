@@ -123,6 +123,11 @@ if (Test-Path "data\database.db") {
     Write-Host "[5/6] Database already exists" -ForegroundColor Cyan
     $reinit = Read-Host "  Reinitialize database? (y/n)"
     if ($reinit -eq "y" -or $reinit -eq "Y") {
+        # Clean up database and sidecar files for a fresh start
+        Remove-Item "data\database.db" -ErrorAction SilentlyContinue
+        Remove-Item "data\database.db-shm" -ErrorAction SilentlyContinue
+        Remove-Item "data\database.db-wal" -ErrorAction SilentlyContinue
+        
         python init_db.py
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] Failed to initialize database" -ForegroundColor Red

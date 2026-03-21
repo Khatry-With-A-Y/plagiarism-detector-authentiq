@@ -9,10 +9,6 @@ function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [file, setFile] = useState(null);
-  const [title, setTitle] = useState('');
-  const [author, setAuthor] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,36 +27,6 @@ function AdminPanel() {
       setError('Failed to load papers');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
-  };
-
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file) {
-      setError('Please select a file');
-      return;
-    }
-
-    setUploading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      await corpusAPI.upload(file, title, author);
-      setSuccess('Paper added to corpus successfully!');
-      setFile(null);
-      setTitle('');
-      setAuthor('');
-      e.target.reset();
-      fetchPapers();
-    } catch (err) {
-      setError(err.response?.data?.error || 'Upload failed');
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -99,55 +65,15 @@ function AdminPanel() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: '30px' }}>
-        <h3>Add Paper to Corpus</h3>
-        <form onSubmit={handleUpload}>
-          <div className="form-group">
-            <label>Title (optional)</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Paper title"
-            />
-          </div>
-          <div className="form-group">
-            <label>Author (optional)</label>
-            <input
-              type="text"
-              value={author}
-              onChange={(e) => setAuthor(e.target.value)}
-              placeholder="Author name"
-            />
-          </div>
-          <div className="form-group">
-            <label>File (.txt, .pdf, .doc, .docx - Max 10MB)</label>
-            <input
-              type="file"
-              onChange={handleFileChange}
-              accept=".txt,.pdf,.doc,.docx"
-              required
-              disabled={uploading}
-            />
-          </div>
-          {error && <div className="error">{error}</div>}
-          {success && <div className="success">{success}</div>}
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={uploading || !file}
-          >
-            {uploading ? 'Uploading...' : 'Add to Corpus'}
-          </button>
-        </form>
-      </div>
+      {error && <div className="error" style={{ marginBottom: '20px' }}>{error}</div>}
+      {success && <div className="success" style={{ marginBottom: '20px' }}>{success}</div>}
 
       <div className="card">
         <h3>Corpus Papers ({papers.length})</h3>
         {loading ? (
           <p>Loading...</p>
         ) : papers.length === 0 ? (
-          <p>No papers in corpus yet. Add papers using the form above.</p>
+          <p>No papers in corpus yet. Add papers from the Dashboard.</p>
         ) : (
           <div style={{ display: 'grid', gap: '10px', marginTop: '20px' }}>
             {papers.map((paper) => (

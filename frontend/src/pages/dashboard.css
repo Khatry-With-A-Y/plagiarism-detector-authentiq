@@ -911,7 +911,6 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  gap: 16px;
 }
 
 .dashboard-spinner {
@@ -921,6 +920,8 @@
   border-top-color: #1e40af;
   border-radius: 50%;
   animation: spin 1s linear infinite;
+  margin: 0 auto 16px;
+  display: block;
 }
 
 @keyframes spin {

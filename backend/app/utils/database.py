@@ -7,7 +7,8 @@ def get_db_connection():
     """Get a database connection"""
     # ensure directory exists
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=30.0)
+    conn.execute('PRAGMA journal_mode=WAL;')
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -90,6 +91,15 @@ def init_database():
         password_hash = hash_password('admin')
         try:
             User.create('admin', 'admin@example.com', password_hash, role='admin')
+        except ValueError:
+            pass
+
+    # check for a default user, create one if missing
+    if not User.get_by_username('user'):
+        print('Creating default user: user / user')
+        password_hash = hash_password('user')
+        try:
+            User.create('user', 'user@example.com', password_hash, role='user')
         except ValueError:
             pass
 

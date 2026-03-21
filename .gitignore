@@ -9,6 +9,8 @@ env/
 ENV/
 .venv
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
@@ -17,6 +19,7 @@ instance/
 .webassets-cache
 
 # IDEs
+.junie
 .vscode/
 .idea/
 *.swp

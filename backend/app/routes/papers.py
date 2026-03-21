@@ -1,3 +1,4 @@
+import threading
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from pathlib import Path
@@ -59,12 +60,14 @@ def upload_submission():
             content_text=content_text
         )
         
-        # Automatically process the submission
-        process_submission_analysis(submission_id)
+        # Start background processing
+        thread = threading.Thread(target=process_submission_analysis_safe, args=(submission_id,))
+        thread.daemon = True
+        thread.start()
         
         submission = Submission.get_by_id(submission_id)
         return jsonify({
-            'message': 'File uploaded successfully',
+            'message': 'File uploaded successfully and analysis started',
             'submission': {
                 'id': submission['id'],
                 'filename': submission['filename'],
@@ -173,9 +176,20 @@ def trigger_processing(submission_id):
     if submission['user_id'] != user['id'] and user['role'] != 'admin':
         return jsonify({'error': 'Access denied'}), 403
     
-    process_submission_analysis(submission_id)
+    # Start background processing
+    thread = threading.Thread(target=process_submission_analysis_safe, args=(submission_id,))
+    thread.daemon = True
+    thread.start()
     
     return jsonify({'message': 'Processing started'}), 200
+
+
+def process_submission_analysis_safe(submission_id):
+    """Wrapper for process_submission_analysis to handle errors in background thread"""
+    try:
+        process_submission_analysis(submission_id)
+    except Exception as e:
+        print(f"Error in background processing for submission {submission_id}: {str(e)}")
 
 
 def process_submission_analysis(submission_id):

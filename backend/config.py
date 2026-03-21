@@ -14,7 +14,7 @@ DATABASE_PATH = DATA_DIR / "database.db"
 # submissions will go into the "processed" folder, corpus papers to "raw_papers"
 UPLOAD_FOLDER = DATA_DIR / "processed"
 CORPUS_FOLDER = DATA_DIR / "raw_papers"
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 ALLOWED_EXTENSIONS = {'.txt', '.pdf', '.doc', '.docx'}
 
 # JWT configuration
