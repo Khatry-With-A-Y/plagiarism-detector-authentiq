@@ -42,6 +42,10 @@ def upload_submission():
     file_path = UPLOAD_FOLDER / safe_filename
     file.save(str(file_path))
     
+    # Check for custom filename
+    custom_filename = request.form.get('filename')
+    final_filename = custom_filename if custom_filename else filename
+    
     # Validate file size
     file_size = file_path.stat().st_size
     if file_size > MAX_FILE_SIZE:
@@ -55,7 +59,7 @@ def upload_submission():
         # Create submission record
         submission_id = Submission.create(
             user_id=user['id'],
-            filename=filename,
+            filename=final_filename,
             file_path=str(file_path),
             content_text=content_text
         )
@@ -128,6 +132,33 @@ def delete_submission(submission_id):
     Submission.delete(submission_id)
 
     return jsonify({'message': 'Submission deleted successfully'}), 200
+
+
+@papers_bp.route('/submissions/<int:submission_id>/filename', methods=['PUT'])
+@require_auth
+def update_submission_filename(submission_id):
+    """Update a submission's filename"""
+    user = get_current_user()
+    submission = Submission.get_by_id(submission_id)
+
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+
+    # Check ownership (unless admin)
+    if submission['user_id'] != user['id'] and user['role'] != 'admin':
+        return jsonify({'error': 'Access denied'}), 403
+
+    data = request.get_json()
+    if not data or 'filename' not in data:
+        return jsonify({'error': 'No filename provided'}), 400
+
+    new_filename = data['filename'].strip()
+    if not new_filename:
+        return jsonify({'error': 'Filename cannot be empty'}), 400
+
+    Submission.update_filename(submission_id, new_filename)
+
+    return jsonify({'message': 'Filename updated successfully', 'filename': new_filename}), 200
 
 
 @papers_bp.route('/submissions/<int:submission_id>/results', methods=['GET'])

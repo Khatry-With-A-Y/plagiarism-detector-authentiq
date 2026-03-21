@@ -519,6 +519,32 @@
 .dashboard-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.dashboard-table th:nth-child(1),
+.dashboard-table td:nth-child(1) {
+  width: 35%;
+}
+
+.dashboard-table th:nth-child(2),
+.dashboard-table td:nth-child(2) {
+  width: 15%;
+}
+
+.dashboard-table th:nth-child(3),
+.dashboard-table td:nth-child(3) {
+  width: 15%;
+}
+
+.dashboard-table th:nth-child(4),
+.dashboard-table td:nth-child(4) {
+  width: 15%;
+}
+
+.dashboard-table th:nth-child(5),
+.dashboard-table td:nth-child(5) {
+  width: 20%;
 }
 
 .dashboard-table th {
@@ -573,11 +599,17 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow: hidden;
+  width: 100%;
 }
 
 .dashboard-doc-name {
   font-weight: 500;
   color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
 
 .dashboard-doc-size {
@@ -902,6 +934,193 @@
 
 .dashboard-footer-link:hover {
   color: #1e40af;
+}
+
+.dashboard-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.dashboard-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background-color: transparent;
+  color: #94a3b8;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dashboard-delete-btn:hover {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+/* Modal Styles */
+.dashboard-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.dashboard-modal {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  width: 100%;
+  max-width: 450px;
+  overflow: hidden;
+  animation: modalFadeIn 0.3s ease-out;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashboard-modal-header {
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.dashboard-modal-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.dashboard-modal-header p {
+  font-size: 14px;
+  color: #64748b;
+}
+
+.danger-text {
+  color: #dc2626 !important;
+}
+
+.delete-warning-box {
+  background-color: #fef2f2;
+  border-left: 4px solid #dc2626;
+  padding: 16px;
+  border-radius: 4px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.delete-warning-box svg {
+  flex-shrink: 0;
+  color: #dc2626;
+  margin-top: 2px;
+}
+
+.delete-warning-box p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #991b1b;
+}
+
+.dashboard-modal-body {
+  padding: 24px;
+}
+
+.dashboard-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dashboard-form-group label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #475569;
+}
+
+.dashboard-modal-input {
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 15px;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.dashboard-modal-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.dashboard-modal-footer {
+  padding: 16px 24px 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  background-color: #f8fafc;
+}
+
+.dashboard-modal-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.dashboard-modal-btn-secondary {
+  background-color: #ffffff;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.dashboard-modal-btn-secondary:hover:not(:disabled) {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
+.dashboard-modal-btn-primary {
+  background-color: #1e40af;
+  color: #ffffff;
+}
+
+.dashboard-modal-btn-primary:hover:not(:disabled) {
+  background-color: #1e3a8a;
+}
+
+.dashboard-modal-btn-danger {
+  background-color: #dc2626;
+  color: #ffffff;
+}
+
+.dashboard-modal-btn-danger:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+.dashboard-modal-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Loading Spinner */

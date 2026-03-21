@@ -14,6 +14,7 @@ export const submissionsAPI = {
   process: (submissionId) => api.post(`/process/${submissionId}`),
 
   delete: (submissionId) => api.delete(`/submissions/${submissionId}`),
+  updateFilename: (submissionId, filename) => api.put(`/submissions/${submissionId}/filename`, { filename }),
 };
 
 export const corpusAPI = {

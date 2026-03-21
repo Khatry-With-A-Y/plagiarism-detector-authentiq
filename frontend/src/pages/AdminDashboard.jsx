@@ -13,6 +13,13 @@ function AdminDashboard() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [newFilename, setNewFilename] = useState('');
+  const [pendingFile, setPendingFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [submissionToDelete, setSubmissionToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
   const fileInputRef = useRef(null);
@@ -47,7 +54,7 @@ function AdminDashboard() {
     }
   };
 
-  const handleFileUpload = async (file) => {
+  const handleFileUpload = (file) => {
     if (!file) return;
 
     const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'text/plain'];
@@ -56,19 +63,68 @@ function AdminDashboard() {
       return;
     }
 
-    setUploading(true);
     setUploadError('');
+    setPendingFile(file);
+    setNewFilename(file.name);
+    setShowRenameModal(true);
+  };
 
+  const handleRenameSubmit = async (e) => {
+    e.preventDefault();
+    if (!newFilename.trim() || isUploading || !pendingFile) return;
+
+    setIsUploading(true);
+    setUploading(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', pendingFile);
+      formData.append('filename', newFilename.trim());
+      
       await submissionsAPI.upload(formData);
+      
+      setShowRenameModal(false);
+      setPendingFile(null);
       fetchSubmissions();
     } catch (err) {
+      console.error('Upload failed:', err);
       setUploadError(err.response?.data?.error || 'Upload failed. Please try again.');
     } finally {
+      setIsUploading(false);
       setUploading(false);
     }
+  };
+
+  const handleRenameCancel = () => {
+    setShowRenameModal(false);
+    setPendingFile(null);
+    setNewFilename('');
+  };
+
+  const handleDeleteClick = (submission) => {
+    setSubmissionToDelete(submission);
+    setShowDeleteModal(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!submissionToDelete || isDeleting) return;
+
+    setIsDeleting(true);
+    try {
+      await submissionsAPI.delete(submissionToDelete.id);
+      setShowDeleteModal(false);
+      setSubmissionToDelete(null);
+      fetchSubmissions();
+    } catch (err) {
+      console.error('Delete failed:', err);
+      setUploadError('Failed to delete submission. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setShowDeleteModal(false);
+    setSubmissionToDelete(null);
   };
 
   const handleDrop = (e) => {
@@ -430,7 +486,7 @@ function AdminDashboard() {
                               </svg>
                             </div>
                             <div className="dashboard-doc-info">
-                              <span className="dashboard-doc-name">{submission.filename}</span>
+                              <span className="dashboard-doc-name" title={submission.filename}>{submission.filename}</span>
                               <span className="dashboard-doc-size">{formatFileSize(submission.file_size || 1200000)}</span>
                             </div>
                           </div>
@@ -454,7 +510,7 @@ function AdminDashboard() {
                             <span className="dashboard-risk-badge pending">Pending</span>
                           )}
                         </td>
-                        <td>
+                        <td className="dashboard-actions-cell">
                           <button
                             className="dashboard-view-link"
                             onClick={() => handleViewReport(submission.id)}
@@ -464,6 +520,18 @@ function AdminDashboard() {
                               <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
                               <polyline points="15 3 21 3 21 9"/>
                               <line x1="10" y1="14" x2="21" y2="3"/>
+                            </svg>
+                          </button>
+                          <button
+                            className="dashboard-delete-btn"
+                            onClick={() => handleDeleteClick(submission)}
+                            title="Delete submission"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6"></polyline>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                              <line x1="10" y1="11" x2="10" y2="17"></line>
+                              <line x1="14" y1="11" x2="14" y2="17"></line>
                             </svg>
                           </button>
                         </td>
@@ -569,6 +637,96 @@ function AdminDashboard() {
           <a href="#" className="dashboard-footer-link">Contact Support</a>
         </div>
       </footer>
+
+      {/* Rename Modal */}
+      {showRenameModal && (
+        <div className="dashboard-modal-overlay">
+          <div className="dashboard-modal">
+            <div className="dashboard-modal-header">
+              <h3>Name your file</h3>
+              <p>Give this submission a name for easier tracking</p>
+            </div>
+            <form onSubmit={handleRenameSubmit}>
+              <div className="dashboard-modal-body">
+                <div className="dashboard-form-group">
+                  <label htmlFor="filename">File Name</label>
+                  <input
+                    type="text"
+                    id="filename"
+                    className="dashboard-modal-input"
+                    value={newFilename}
+                    onChange={(e) => setNewFilename(e.target.value)}
+                    placeholder="Enter file name"
+                    autoFocus
+                    required
+                  />
+                </div>
+              </div>
+              <div className="dashboard-modal-footer">
+                <button 
+                  type="button" 
+                  className="dashboard-modal-btn dashboard-modal-btn-secondary" 
+                  onClick={handleRenameCancel}
+                  disabled={isUploading}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="dashboard-modal-btn dashboard-modal-btn-primary"
+                  disabled={isUploading || !newFilename.trim()}
+                >
+                  {isUploading ? 'Uploading...' : 'Upload File'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="dashboard-modal-overlay">
+          <div className="dashboard-modal">
+            <div className="dashboard-modal-header">
+              <h3 className="danger-text">Delete Submission</h3>
+              <p>Are you sure you want to delete this file?</p>
+            </div>
+            <div className="dashboard-modal-body">
+              <div className="delete-warning-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <p>
+                  <strong>Warning:</strong> This action cannot be undone. All data and analysis results associated with 
+                  "<em>{submissionToDelete?.filename}</em>" will be permanently removed from our servers. 
+                  We are not liable for any loss of information resulting from this action.
+                </p>
+              </div>
+            </div>
+            <div className="dashboard-modal-footer">
+              <button 
+                type="button" 
+                className="dashboard-modal-btn dashboard-modal-btn-secondary" 
+                onClick={handleDeleteCancel}
+                disabled={isDeleting}
+              >
+                Keep File
+              </button>
+              <button 
+                type="button" 
+                className="dashboard-modal-btn dashboard-modal-btn-danger"
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

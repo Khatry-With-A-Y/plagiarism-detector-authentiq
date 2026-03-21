@@ -161,6 +161,17 @@ class Submission:
         conn.close()
 
     @staticmethod
+    def update_filename(submission_id, filename):
+        """Update submission filename"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE submissions SET filename = ? WHERE id = ?
+        ''', (filename, submission_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
     def delete(submission_id):
         """Delete a submission and its results"""
         conn = get_db_connection()
