@@ -299,7 +299,7 @@ function AdminDashboard() {
         {/* Welcome Section */}
         <section className="dashboard-welcome">
           <div className="dashboard-welcome-left">
-            <h1 className="dashboard-welcome-title">Welcome to Authentiq</h1>
+            <h1 className="dashboard-welcome-title">Welcome to Authentiq, {user?.username ? user.username.charAt(0).toUpperCase() + user.username.slice(1) : ''}!</h1>
             <p className="dashboard-welcome-subtitle">
               Maintain the highest standards of academic integrity. Upload your documents
               for a comprehensive scan against millions of sources and receive detailed

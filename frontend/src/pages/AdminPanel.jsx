@@ -49,7 +49,7 @@ function AdminPanel() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
         <div>
           <h1>Admin Panel - Corpus Management</h1>
-          <p>Welcome, {user?.username}!</p>
+          <p>Welcome, {user?.username ? user.username.charAt(0).toUpperCase() + user.username.slice(1) : ''}!</p>
         </div>
         <div>
           <button
