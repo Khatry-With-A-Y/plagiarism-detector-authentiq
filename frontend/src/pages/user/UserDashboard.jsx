@@ -196,6 +196,53 @@ function UserDashboard() {
     : 0;
   const highRiskAlerts = completedSubmissions.filter(s => (s.similarity_score || 0) >= 40).length;
 
+  // Calculate time-based stats for trends
+  const now = new Date();
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  const thisWeekStart = new Date(now);
+  thisWeekStart.setDate(now.getDate() - now.getDay());
+  thisWeekStart.setHours(0, 0, 0, 0);
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const lastWeekEnd = new Date(thisWeekStart);
+  lastWeekEnd.setMilliseconds(-1);
+
+  // Reports this month vs last month
+  const reportsThisMonth = submissions.filter(s => new Date(s.uploaded_at) >= thisMonthStart).length;
+  const reportsLastMonth = submissions.filter(s => {
+    const date = new Date(s.uploaded_at);
+    return date >= lastMonthStart && date <= lastMonthEnd;
+  }).length;
+  const reportsChange = reportsLastMonth > 0
+    ? (((reportsThisMonth - reportsLastMonth) / reportsLastMonth) * 100).toFixed(0)
+    : reportsThisMonth > 0 ? 100 : 0;
+
+  // Average similarity this month vs last month
+  const completedThisMonth = completedSubmissions.filter(s => new Date(s.uploaded_at) >= thisMonthStart);
+  const completedLastMonth = completedSubmissions.filter(s => {
+    const date = new Date(s.uploaded_at);
+    return date >= lastMonthStart && date <= lastMonthEnd;
+  });
+  const avgThisMonth = completedThisMonth.length > 0
+    ? completedThisMonth.reduce((acc, s) => acc + (s.similarity_score || 0), 0) / completedThisMonth.length
+    : 0;
+  const avgLastMonth = completedLastMonth.length > 0
+    ? completedLastMonth.reduce((acc, s) => acc + (s.similarity_score || 0), 0) / completedLastMonth.length
+    : 0;
+  const avgChange = (avgThisMonth - avgLastMonth).toFixed(1);
+
+  // High risk alerts this week
+  const highRiskThisWeek = completedSubmissions.filter(s =>
+    new Date(s.uploaded_at) >= thisWeekStart && (s.similarity_score || 0) >= 40
+  ).length;
+  const highRiskLastWeek = completedSubmissions.filter(s => {
+    const date = new Date(s.uploaded_at);
+    return date >= lastWeekStart && date < thisWeekStart && (s.similarity_score || 0) >= 40;
+  }).length;
+  const highRiskChange = highRiskThisWeek - highRiskLastWeek;
+
   // Filter and paginate submissions
   const filteredSubmissions = submissions.filter(s =>
     s.filename.toLowerCase().includes(searchQuery.toLowerCase())
@@ -361,11 +408,17 @@ function UserDashboard() {
             <div className="dashboard-stat-content">
               <p className="dashboard-stat-label">Total Reports</p>
               <h3 className="dashboard-stat-value">{totalReports}</h3>
-              <p className="dashboard-stat-trend positive">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-                </svg>
-                +12% from last month
+              <p className={`dashboard-stat-trend ${Number(reportsChange) >= 0 ? 'positive' : 'negative'}`}>
+                {Number(reportsChange) >= 0 ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                  </svg>
+                )}
+                {Number(reportsChange) >= 0 ? '+' : ''}{reportsChange}% from last month
               </p>
             </div>
             <div className="dashboard-stat-icon blue">
@@ -379,11 +432,17 @@ function UserDashboard() {
             <div className="dashboard-stat-content">
               <p className="dashboard-stat-label">Average Similarity</p>
               <h3 className="dashboard-stat-value">{averageSimilarity}%</h3>
-              <p className="dashboard-stat-trend negative">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
-                </svg>
-                ↑ 2.4% from last month
+              <p className={`dashboard-stat-trend ${Number(avgChange) <= 0 ? 'positive' : 'negative'}`}>
+                {Number(avgChange) <= 0 ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                  </svg>
+                )}
+                {Number(avgChange) > 0 ? '↑' : Number(avgChange) < 0 ? '↓' : ''} {Math.abs(Number(avgChange))}% from last month
               </p>
             </div>
             <div className="dashboard-stat-icon gray">
@@ -398,11 +457,17 @@ function UserDashboard() {
             <div className="dashboard-stat-content">
               <p className="dashboard-stat-label">High Risk Alerts</p>
               <h3 className="dashboard-stat-value">{highRiskAlerts}</h3>
-              <p className="dashboard-stat-trend negative">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
-                </svg>
-                ↑ 1 new this week
+              <p className={`dashboard-stat-trend ${highRiskChange <= 0 ? 'positive' : 'negative'}`}>
+                {highRiskChange <= 0 ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                  </svg>
+                )}
+                {highRiskChange > 0 ? `↑ ${highRiskChange} new` : highRiskChange < 0 ? `↓ ${Math.abs(highRiskChange)} less` : 'No change'} this week
               </p>
             </div>
             <div className="dashboard-stat-icon red">
