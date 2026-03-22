@@ -57,8 +57,11 @@ def login():
         return jsonify({'error': 'Username and password required'}), 400
     
     user = User.get_by_username(username)
-    if not user or not verify_password(user['password_hash'], password):
-        return jsonify({'error': 'Invalid credentials'}), 401
+    if not user:
+        return jsonify({'error': "The username you entered isn't connected to an account."}), 401
+    
+    if not verify_password(user['password_hash'], password):
+        return jsonify({'error': 'Incorrect password. Please enter the correct password.'}), 401
     
     token = generate_token(user['id'], user['username'], user['role'])
     
