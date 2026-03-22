@@ -33,5 +33,11 @@ export const corpusAPI = {
   delete: (paperId) => api.delete(`/corpus/${paperId}`),
 };
 
+export const adminAPI = {
+  getStats: () => api.get('/admin/stats'),
+  getCorpusGrowth: (timeframe = 'week') => api.get(`/admin/corpus-growth?timeframe=${timeframe}`),
+  getProcessingTime: () => api.get('/admin/processing-time'),
+};
+
 // optionally export a default object combining both
-export default { submissionsAPI, corpusAPI };
+export default { submissionsAPI, corpusAPI, adminAPI };

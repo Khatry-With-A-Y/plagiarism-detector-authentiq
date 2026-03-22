@@ -14,6 +14,15 @@ from ..utils.cosine import process_submission as compute_similarity
 
 papers_bp = Blueprint('papers', __name__, url_prefix='/api')
 
+import time
+
+# Simple in-memory cache for admin stats to prevent database overload
+_admin_cache = {
+    'stats': {'data': None, 'last_updated': 0},
+    'corpus_growth': {} # keyed by timeframe
+}
+CACHE_TTL = 60 # seconds
+
 # ========== submission endpoints ===========
 
 @papers_bp.route('/submissions/upload', methods=['POST'])
@@ -368,3 +377,209 @@ def delete_corpus_paper(paper_id):
 def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'ok'}), 200
+
+# ======== admin overview ========
+
+@papers_bp.route('/admin/stats', methods=['GET'])
+@require_admin
+def get_admin_stats():
+    """Get system-wide statistics for the admin dashboard"""
+    current_time = time.time()
+    if current_time - _admin_cache['stats']['last_updated'] < CACHE_TTL and _admin_cache['stats']['data'] is not None:
+        return jsonify(_admin_cache['stats']['data']), 200
+
+    from ..utils.database import get_db_connection
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Total Papers Indexed
+    cursor.execute('SELECT COUNT(*) FROM papers')
+    total_papers = cursor.fetchone()[0]
+
+    # Registered Users
+    cursor.execute('SELECT COUNT(*) FROM users')
+    total_users = cursor.fetchone()[0]
+
+    # System Total Reports
+    cursor.execute('SELECT COUNT(*) FROM submissions')
+    total_reports = cursor.fetchone()[0]
+
+    # Submissions with completed status for average similarity & high risk
+    cursor.execute("""
+        SELECT 
+            COALESCE(AVG(max_score), 0) as avg_score, 
+            COALESCE(SUM(CASE WHEN max_score >= 0.4 THEN 1 ELSE 0 END), 0) as high_risk_count 
+        FROM (
+            SELECT s.id, COALESCE(MAX(r.similarity_score), 0) as max_score 
+            FROM submissions s 
+            LEFT JOIN similarity_results r ON s.id = r.submission_id 
+            WHERE s.status = 'completed' 
+            GROUP BY s.id
+        )
+    """)
+    stats_result = cursor.fetchone()
+    
+    avg_score_raw = stats_result['avg_score'] if stats_result and stats_result['avg_score'] is not None else 0
+    high_risk_alerts = stats_result['high_risk_count'] if stats_result and stats_result['high_risk_count'] is not None else 0
+    average_similarity = round(avg_score_raw * 100, 1)
+
+    conn.close()
+
+    result_data = {
+        'total_papers_indexed': total_papers,
+        'registered_users': total_users,
+        'system_total_reports': total_reports,
+        'average_similarity': average_similarity,
+        'high_risk_alerts': high_risk_alerts
+    }
+    
+    # Update cache
+    _admin_cache['stats']['data'] = result_data
+    _admin_cache['stats']['last_updated'] = current_time
+
+    return jsonify(result_data), 200
+
+@papers_bp.route('/admin/corpus-growth', methods=['GET'])
+@require_admin
+def get_corpus_growth():
+    """Get corpus growth statistics over time for charts"""
+    timeframe = request.args.get('timeframe', 'week') # past_hour, 24_hours, week
+    
+    current_time = time.time()
+    if timeframe in _admin_cache['corpus_growth']:
+        cache_entry = _admin_cache['corpus_growth'][timeframe]
+        if current_time - cache_entry['last_updated'] < CACHE_TTL and cache_entry['data'] is not None:
+            return jsonify(cache_entry['data']), 200
+
+    from ..utils.database import get_db_connection
+    from datetime import datetime, timedelta
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    now = datetime.utcnow()
+    
+    # We will fetch all data from that timeframe, group it appropriately.
+    # To keep it simple, we fetch raw times and aggregate in Python
+    
+    if timeframe == 'past_hour':
+        start_time = now - timedelta(hours=1)
+        # Format: 5 minute intervals (12 points)
+        num_points = 12
+        interval_mins = 5
+        date_format = "%H:%M"
+    elif timeframe == '24_hours':
+        start_time = now - timedelta(hours=24)
+        # Format: 2 hour intervals (12 points)
+        num_points = 12
+        interval_mins = 120
+        date_format = "%H:%M"
+    else: # week
+        start_time = now - timedelta(days=7)
+        # Format: daily (7 points)
+        num_points = 7
+        interval_mins = 24 * 60
+        date_format = "%a" # Mon, Tue, etc.
+
+    cursor.execute(
+        "SELECT uploaded_at FROM papers WHERE uploaded_at >= ?", 
+        (start_time.strftime('%Y-%m-%d %H:%M:%S'),)
+    )
+    rows = cursor.fetchall()
+    
+    # Base count before start_time
+    cursor.execute(
+        "SELECT COUNT(*) FROM papers WHERE uploaded_at < ?", 
+        (start_time.strftime('%Y-%m-%d %H:%M:%S'),)
+    )
+    base_count = cursor.fetchone()[0]
+    conn.close()
+    
+    # Aggregate data points
+    labels = []
+    values = []
+    
+    current_count = base_count
+    
+    for i in range(num_points):
+        interval_start = start_time + timedelta(minutes=i * interval_mins)
+        interval_end = start_time + timedelta(minutes=(i + 1) * interval_mins)
+        
+        # Count papers in this interval
+        interval_added = sum(1 for row in rows if interval_start <= datetime.strptime(row['uploaded_at'], '%Y-%m-%d %H:%M:%S') < interval_end)
+        current_count += interval_added
+        
+        labels.append(interval_end.strftime(date_format))
+        values.append(current_count)
+        
+    result_data = {
+        'labels': labels,
+        'values': values,
+        'added_count': len(rows),
+        'timeframe': timeframe
+    }
+    
+    # Update cache
+    _admin_cache['corpus_growth'][timeframe] = {
+        'data': result_data,
+        'last_updated': current_time
+    }
+        
+    return jsonify(result_data), 200
+
+
+@papers_bp.route('/admin/processing-time', methods=['GET'])
+@require_admin
+def get_processing_time():
+    """Get overall average processing time and recent latency trend data"""
+    current_time = time.time()
+    
+    if 'processing_time' in _admin_cache:
+        cache_entry = _admin_cache['processing_time']
+        if current_time - cache_entry['last_updated'] < CACHE_TTL and cache_entry['data'] is not None:
+            return jsonify(cache_entry['data']), 200
+
+    from ..utils.database import get_db_connection
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT 
+            CAST(strftime('%s', MAX(r.created_at)) AS INTEGER) - CAST(strftime('%s', s.uploaded_at) AS INTEGER) as processing_time
+        FROM submissions s
+        JOIN similarity_results r ON s.id = r.submission_id
+        WHERE s.status = 'completed'
+        GROUP BY s.id
+        ORDER BY s.uploaded_at ASC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    times = [row['processing_time'] for row in rows if row['processing_time'] is not None and row['processing_time'] >= 0]
+    
+    if times:
+        avg_time = sum(times) / len(times)
+        sorted_times = sorted(times)
+        p95_index = int(len(sorted_times) * 0.95)
+        if p95_index >= len(sorted_times):
+            p95_index = len(sorted_times) - 1
+        p95_time = sorted_times[p95_index]
+        # Get the last 20 processing times for the trend graph
+        trend = times[-20:]
+    else:
+        avg_time = 0
+        p95_time = 0
+        trend = []
+        
+    result_data = {
+        'average_time': round(avg_time, 1),
+        'p95_time': round(p95_time, 1),
+        'trend': trend
+    }
+    
+    _admin_cache['processing_time'] = {
+        'data': result_data,
+        'last_updated': current_time
+    }
+    
+    return jsonify(result_data), 200
