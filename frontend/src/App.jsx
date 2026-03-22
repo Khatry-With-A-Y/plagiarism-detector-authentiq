@@ -7,7 +7,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Results from './pages/user/Results';
 import UserStatistics from './pages/user/UserStatistics';
-import AdminPanel from './pages/admin/AdminPanel';
+import CorpusManagement from './pages/admin/CorpusManagement';
 import UserManagement from './pages/admin/UserManagement';
 import './index.css';
 
@@ -56,7 +56,7 @@ function App() {
             path="/admin"
             element={
               <AdminRoute>
-                <AdminPanel />
+                <CorpusManagement />
               </AdminRoute>
             }
           />
