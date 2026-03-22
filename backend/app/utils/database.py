@@ -26,9 +26,16 @@ def init_database():
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT DEFAULT 'user' CHECK(role IN ('user', 'admin')),
+            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Check if status column exists, add it if not (migration)
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [col['name'] for col in cursor.fetchall()]
+    if 'status' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked'))")
     
     # Create papers table (corpus)
     cursor.execute('''

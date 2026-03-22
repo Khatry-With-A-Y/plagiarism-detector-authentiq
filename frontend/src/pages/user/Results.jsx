@@ -1,8 +1,8 @@
 import React from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import useAuth from '../hooks/useAuth';
-import useFetchResults from '../hooks/useFetchResults';
-import './dashboard.css';
+import useAuth from '../../hooks/useAuth';
+import useFetchResults from '../../hooks/useFetchResults';
+import '../dashboard.css';
 
 function Results() {
   const { id } = useParams();

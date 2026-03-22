@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { corpusAPI } from '../api/results';
-import useAuth from '../hooks/useAuth';
+import { corpusAPI } from '../../api/results';
+import useAuth from '../../hooks/useAuth';
 
 function AdminPanel() {
   const { user, logout, isAdmin } = useAuth();

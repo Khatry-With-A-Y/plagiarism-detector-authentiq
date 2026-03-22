@@ -1,7 +1,7 @@
 import React from 'react';
 import useAuth from '../hooks/useAuth';
-import AdminDashboard from './AdminDashboard';
-import UserDashboard from './UserDashboard';
+import AdminDashboard from './admin/AdminDashboard';
+import UserDashboard from './user/UserDashboard';
 
 function Dashboard() {
   const { isAdmin } = useAuth();

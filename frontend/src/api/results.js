@@ -37,6 +37,8 @@ export const adminAPI = {
   getStats: () => api.get('/admin/stats'),
   getCorpusGrowth: (timeframe = 'week') => api.get(`/admin/corpus-growth?timeframe=${timeframe}`),
   getProcessingTime: () => api.get('/admin/processing-time'),
+  getUsers: () => api.get('/auth/users'),
+  toggleUserStatus: (userId) => api.put(`/auth/users/${userId}/toggle-status`),
 };
 
 // optionally export a default object combining both

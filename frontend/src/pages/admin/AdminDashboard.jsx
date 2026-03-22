@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { adminAPI } from '../api/results';
-import useAuth from '../hooks/useAuth';
-import './dashboard.css';
+import { adminAPI } from '../../api/results';
+import useAuth from '../../hooks/useAuth';
+import '../dashboard.css';
 import './adminStatistics.css';
 
 function AdminDashboard() {
@@ -177,7 +177,7 @@ function AdminDashboard() {
               </svg>
               Admin Dashboard
             </Link>
-            <Link to="#" className="dashboard-nav-link">
+            <Link to="/users" className="dashboard-nav-link">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
                 <circle cx="9" cy="7" r="4"></circle>

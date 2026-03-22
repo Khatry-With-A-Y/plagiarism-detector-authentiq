@@ -5,9 +5,10 @@ import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import Results from './pages/Results';
-import UserStatistics from './pages/UserStatistics';
-import AdminPanel from './pages/AdminPanel';
+import Results from './pages/user/Results';
+import UserStatistics from './pages/user/UserStatistics';
+import AdminPanel from './pages/admin/AdminPanel';
+import UserManagement from './pages/admin/UserManagement';
 import './index.css';
 
 // Protected Route component
@@ -56,6 +57,14 @@ function App() {
             element={
               <AdminRoute>
                 <AdminPanel />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <AdminRoute>
+                <UserManagement />
               </AdminRoute>
             }
           />

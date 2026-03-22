@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { submissionsAPI } from '../api/results';
-import useAuth from '../hooks/useAuth';
+import { submissionsAPI } from '../../api/results';
+import useAuth from '../../hooks/useAuth';
 import './userStatistics.css';
 
 function UserStatistics() {

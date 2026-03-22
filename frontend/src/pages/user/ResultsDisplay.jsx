@@ -1,6 +1,6 @@
 import React from 'react';
-import useFetchResults from '../hooks/useFetchResults';
-import ResultCard from '../components/ResultCard';
+import useFetchResults from '../../hooks/useFetchResults';
+import ResultCard from '../../components/ResultCard';
 
 function ResultsDisplay({ submissionId }) {
   const { results, submission, loading, error, refresh } = useFetchResults(submissionId);

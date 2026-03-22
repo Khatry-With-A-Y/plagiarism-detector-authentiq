@@ -30,7 +30,20 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !isAuthEndpoint) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      const isBlocked = error.response.data?.error === 'Account is blocked';
+      window.location.href = isBlocked ? '/login?error=blocked' : '/login';
+    } else if (!error.response && error.message === 'Network Error' && localStorage.getItem('token') && !isAuthEndpoint) {
+      // If server resets connection (e.g. 401 during file upload), check auth status
+      axios.get(`${API_BASE_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      }).catch(err => {
+        if (err.response?.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          const isBlocked = err.response.data?.error === 'Account is blocked';
+          window.location.href = isBlocked ? '/login?error=blocked' : '/login';
+        }
+      });
     }
     return Promise.reject(error);
   }

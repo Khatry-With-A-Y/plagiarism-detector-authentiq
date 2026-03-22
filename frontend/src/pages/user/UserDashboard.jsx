@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { submissionsAPI } from '../api/results';
-import useAuth from '../hooks/useAuth';
-import './dashboard.css';
+import { submissionsAPI } from '../../api/results';
+import useAuth from '../../hooks/useAuth';
+import '../dashboard.css';
 
 function UserDashboard() {
   const { user, logout, isAdmin } = useAuth();

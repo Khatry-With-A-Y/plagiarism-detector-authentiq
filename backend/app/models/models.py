@@ -52,6 +52,16 @@ class User:
         conn.close()
         return dict(user) if user else None
 
+    @staticmethod
+    def get_all():
+        """Get all users"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, username, email, role, status, created_at FROM users ORDER BY created_at DESC')
+        users = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return users
+
 
 class Paper:
     @staticmethod

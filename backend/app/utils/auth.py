@@ -65,6 +65,8 @@ def require_auth(f):
         user = get_current_user()
         if not user:
             return jsonify({'error': 'Authentication required'}), 401
+        if user.get('status') == 'blocked':
+            return jsonify({'error': 'Account is blocked'}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -76,6 +78,8 @@ def require_admin(f):
         user = get_current_user()
         if not user:
             return jsonify({'error': 'Authentication required'}), 401
+        if user.get('status') == 'blocked':
+            return jsonify({'error': 'Account is blocked'}), 401
         if user['role'] != 'admin':
             return jsonify({'error': 'Admin access required'}), 403
         return f(*args, **kwargs)
