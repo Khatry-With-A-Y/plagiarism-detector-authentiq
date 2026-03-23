@@ -1,4 +1,5 @@
 import re
+import functools
 import nltk
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet
@@ -18,12 +19,23 @@ def _ensure_nltk_data():
 
 _ensure_nltk_data()
 
+# Module-level lemmatizer for caching
+_lemmatizer = WordNetLemmatizer()
+
+@functools.lru_cache(maxsize=50000)
+def _cached_lemmatize(word):
+    """
+    Cached lemmatization to avoid repeated WordNet lookups.
+    Tries verb form first, then noun form.
+    """
+    lemma = _lemmatizer.lemmatize(word, pos='v')
+    if lemma != word:
+        return lemma
+    return _lemmatizer.lemmatize(word, pos='n')
+
 
 class TextProcessor:
     """Handles text cleaning and preprocessing with tokenization, stopword removal, and lemmatization"""
-
-    # Shared lemmatizer instance
-    _lemmatizer = WordNetLemmatizer()
 
     # Common English stopwords
     STOPWORDS = {
@@ -42,15 +54,10 @@ class TextProcessor:
     def lemmatize(cls, word):
         """
         Lemmatize a word to its base/dictionary form.
-        Tries verb form first, then noun form for best results.
+        Uses cached function to avoid repeated WordNet lookups.
         Examples: 'running' -> 'run', 'studies' -> 'study', 'better' -> 'better'
         """
-        # Try as verb first (handles running->run, studies->study)
-        lemma = cls._lemmatizer.lemmatize(word, pos='v')
-        if lemma != word:
-            return lemma
-        # Fall back to noun form (handles cats->cat, children->child)
-        return cls._lemmatizer.lemmatize(word, pos='n')
+        return _cached_lemmatize(word)
 
     @classmethod
     def clean_text(cls, text, remove_stopwords=False):

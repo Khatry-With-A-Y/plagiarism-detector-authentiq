@@ -4,11 +4,13 @@ from ...config import DATABASE_PATH
 
 
 def get_db_connection():
-    """Get a database connection"""
+    """Get a database connection with optimized settings for concurrent access"""
     # ensure directory exists
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH, timeout=30.0)
-    conn.execute('PRAGMA journal_mode=WAL;')
+    conn.execute('PRAGMA journal_mode=WAL;')       # Write-Ahead Logging for better concurrency
+    conn.execute('PRAGMA synchronous=NORMAL;')     # Faster writes, still safe with WAL
+    conn.execute('PRAGMA cache_size=-64000;')      # 64MB cache for faster reads
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -46,11 +48,19 @@ def init_database():
             filename TEXT NOT NULL,
             file_path TEXT NOT NULL,
             content_text TEXT,
+            preprocessed_ngrams TEXT,
             uploaded_by INTEGER,
             uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (uploaded_by) REFERENCES users(id)
         )
     ''')
+
+    # Migration: Add preprocessed_ngrams column if it doesn't exist
+    cursor.execute("PRAGMA table_info(papers)")
+    paper_columns = [col['name'] for col in cursor.fetchall()]
+    if 'preprocessed_ngrams' not in paper_columns:
+        cursor.execute("ALTER TABLE papers ADD COLUMN preprocessed_ngrams TEXT")
+        print("Added preprocessed_ngrams column to papers table")
     
     # Create submissions table
     cursor.execute('''

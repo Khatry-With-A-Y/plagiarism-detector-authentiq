@@ -1,4 +1,4 @@
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from pathlib import Path
@@ -10,11 +10,15 @@ from ...config import (
 from ..models.models import User, Paper, Submission, SimilarityResult
 from ..utils.auth import get_current_user, require_auth, require_admin
 from ..utils.file_processor import extract_text, validate_file
-from ..utils.cosine import process_submission as compute_similarity
+from ..utils.cosine import process_submission_with_cached_idf
+from ..utils.corpus_cache import get_corpus_cache
 
 papers_bp = Blueprint('papers', __name__, url_prefix='/api')
 
 import time
+
+# Thread pool for submission processing - limits concurrent workers to prevent resource exhaustion
+_submission_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="submission_worker")
 
 # Simple in-memory cache for admin stats to prevent database overload
 _admin_cache = {
@@ -73,10 +77,8 @@ def upload_submission():
             content_text=content_text
         )
         
-        # Start background processing
-        thread = threading.Thread(target=process_submission_analysis_safe, args=(submission_id,))
-        thread.daemon = True
-        thread.start()
+        # Start background processing using thread pool
+        _submission_executor.submit(process_submission_analysis_safe, submission_id)
         
         submission = Submission.get_by_id(submission_id)
         return jsonify({
@@ -216,11 +218,9 @@ def trigger_processing(submission_id):
     if submission['user_id'] != user['id'] and user['role'] != 'admin':
         return jsonify({'error': 'Access denied'}), 403
     
-    # Start background processing
-    thread = threading.Thread(target=process_submission_analysis_safe, args=(submission_id,))
-    thread.daemon = True
-    thread.start()
-    
+    # Start background processing using thread pool
+    _submission_executor.submit(process_submission_analysis_safe, submission_id)
+
     return jsonify({'message': 'Processing started'}), 200
 
 
@@ -233,31 +233,34 @@ def process_submission_analysis_safe(submission_id):
 
 
 def process_submission_analysis(submission_id):
-    """Process a submission against the corpus"""
+    """Process a submission against the corpus using cached corpus and IDF (FASTEST)"""
     submission = Submission.get_by_id(submission_id)
     if not submission:
         return
-    
+
     Submission.update_status(submission_id, 'processing')
-    
+
     try:
-        # Get all corpus papers
-        corpus_papers = Paper.get_all_texts()
-        
-        if not corpus_papers:
+        # Get cached corpus and IDF (shared across all worker threads)
+        corpus_cache = get_corpus_cache()
+        corpus_preprocessed = corpus_cache.get_corpus()
+        cached_idf = corpus_cache.get_idf()
+
+        if not corpus_preprocessed:
             Submission.update_status(submission_id, 'completed')
             return
-        
-        # Process similarity
-        results = compute_similarity(
+
+        # Process similarity using cached corpus AND cached IDF - no redundant computation!
+        results = process_submission_with_cached_idf(
             submission['content_text'],
-            corpus_papers
+            corpus_preprocessed,
+            cached_idf
         )
-        
+
         # Save results
         result_tuples = [(r['paper_id'], r['similarity_score']) for r in results]
         SimilarityResult.create_batch(submission_id, result_tuples)
-        
+
         Submission.update_status(submission_id, 'completed')
     except Exception as e:
         Submission.update_status(submission_id, 'pending')
@@ -315,7 +318,10 @@ def upload_corpus_paper():
             content_text=content_text,
             uploaded_by=user['id']
         )
-        
+
+        # Invalidate corpus cache so new paper is included in similarity checks
+        get_corpus_cache().invalidate()
+
         paper = Paper.get_by_id(paper_id)
         return jsonify({
             'message': 'Paper added to corpus successfully',
@@ -368,7 +374,10 @@ def delete_corpus_paper(paper_id):
     
     # Delete from database
     Paper.delete(paper_id)
-    
+
+    # Invalidate corpus cache so deleted paper is excluded from similarity checks
+    get_corpus_cache().invalidate()
+
     return jsonify({'message': 'Paper deleted successfully'}), 200
 
 

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import datetime
 from ..utils.database import get_db_connection
@@ -66,13 +67,21 @@ class User:
 class Paper:
     @staticmethod
     def create(title, author, filename, file_path, content_text, uploaded_by):
-        """Add a paper to the corpus"""
+        """Add a paper to the corpus with preprocessed n-grams for fast similarity"""
+        from ..utils.text_processing import TextProcessor
+
+        # Compute n-grams at ingestion time for caching
+        preprocessed_ngrams = None
+        if content_text:
+            ngrams = TextProcessor.preprocess_for_tfidf(content_text)
+            preprocessed_ngrams = json.dumps(ngrams)
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO papers (title, author, filename, file_path, content_text, uploaded_by)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (title, author, filename, file_path, content_text, uploaded_by))
+            INSERT INTO papers (title, author, filename, file_path, content_text, preprocessed_ngrams, uploaded_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (title, author, filename, file_path, content_text, preprocessed_ngrams, uploaded_by))
         conn.commit()
         paper_id = cursor.lastrowid
         conn.close()
@@ -100,13 +109,63 @@ class Paper:
     
     @staticmethod
     def get_all_texts():
-        """Get all paper texts for similarity calculation"""
+        """Get all paper texts for similarity calculation (legacy method)"""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT id, content_text FROM papers WHERE content_text IS NOT NULL')
         papers = [(row['id'], row['content_text']) for row in cursor.fetchall()]
         conn.close()
         return papers
+
+    @staticmethod
+    def get_all_preprocessed():
+        """
+        Get all paper preprocessed n-grams for fast similarity calculation.
+        Returns list of tuples: (paper_id, ngrams_list)
+        Falls back to computing n-grams for papers without cached data.
+        """
+        from ..utils.text_processing import TextProcessor
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, content_text, preprocessed_ngrams FROM papers WHERE content_text IS NOT NULL')
+
+        results = []
+        papers_needing_update = []
+
+        for row in cursor.fetchall():
+            paper_id = row['id']
+
+            if row['preprocessed_ngrams']:
+                # Use cached n-grams
+                ngrams = json.loads(row['preprocessed_ngrams'])
+            else:
+                # Fallback: compute on-the-fly (for papers ingested before migration)
+                ngrams = TextProcessor.preprocess_for_tfidf(row['content_text'])
+                papers_needing_update.append((paper_id, json.dumps(ngrams)))
+
+            if ngrams:  # Only include papers with valid n-grams
+                results.append((paper_id, ngrams))
+
+        conn.close()
+
+        # Lazy update: cache computed n-grams for future use
+        if papers_needing_update:
+            Paper._batch_update_preprocessed(papers_needing_update)
+
+        return results
+
+    @staticmethod
+    def _batch_update_preprocessed(updates):
+        """Batch update preprocessed_ngrams for papers"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.executemany(
+            'UPDATE papers SET preprocessed_ngrams = ? WHERE id = ?',
+            [(ngrams, paper_id) for paper_id, ngrams in updates]
+        )
+        conn.commit()
+        conn.close()
     
     @staticmethod
     def delete(paper_id):
