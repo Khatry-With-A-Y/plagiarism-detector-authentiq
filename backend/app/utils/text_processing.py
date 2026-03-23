@@ -58,12 +58,18 @@ class TextProcessor:
         Clean and preprocess text with tokenization, optional stopword removal, and lemmatization.
 
         Steps:
-        1. Lowercase the text
-        2. Remove non-letter characters (punctuation, numbers)
-        3. Tokenize by splitting on whitespace
-        4. Lemmatize each token to its base form
-        5. Optionally remove stopwords
+        1. Normalize hyphenated line breaks (rejoin split words)
+        2. Normalize all whitespace to single spaces
+        3. Lowercase the text
+        4. Remove non-letter characters (punctuation, numbers)
+        5. Tokenize by splitting on whitespace
+        6. Lemmatize each token to its base form
+        7. Optionally remove stopwords
         """
+        # Fix hyphenated words split across lines (e.g., "algo-\nrithm" -> "algorithm")
+        text = re.sub(r'-\s*\n\s*', '', text)
+        # Normalize all whitespace (newlines, tabs, multiple spaces) to single spaces
+        text = re.sub(r'\s+', ' ', text)
         text = text.lower()
         text = re.sub(r'[^a-z\s]', '', text)  # remove non-letter characters
         words = text.split()  # tokenization

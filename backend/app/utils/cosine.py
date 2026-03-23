@@ -67,9 +67,9 @@ class SimilarityEngine:
             # Dot product
             dot = sum((sub_tf.get(t, 0.0) * idf[t]) * (corp_tf.get(t, 0.0) * idf[t]) for t in shared_terms)
             
-            # Norms
-            norm_sub = math.sqrt(sum((sub_tf.get(t, 0.0) * idf[t])**2 for t in sub_words if t in idf))
-            norm_corp = math.sqrt(sum((corp_tf.get(t, 0.0) * idf[t])**2 for t in corp_words if t in idf))
+            # Norms (use set() to count each unique term once, matching dot product)
+            norm_sub = math.sqrt(sum((sub_tf.get(t, 0.0) * idf[t])**2 for t in set(sub_words) if t in idf))
+            norm_corp = math.sqrt(sum((corp_tf.get(t, 0.0) * idf[t])**2 for t in set(corp_words) if t in idf))
             
             if norm_sub > 0 and norm_corp > 0:
                 similarity = dot / (norm_sub * norm_corp)

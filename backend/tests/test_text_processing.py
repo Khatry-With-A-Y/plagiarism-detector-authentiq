@@ -1,10 +1,12 @@
 """
 Test cases for text_processing.py
 
-Tests the three core preprocessing requirements:
+Tests the core preprocessing requirements:
 1. Tokenization - splitting text into words
 2. Stop words removal - filtering out common words
 3. Lemmatization - reducing words to base/dictionary form
+4. Hyphenated line break handling - rejoining split words
+5. Whitespace normalization - consistent spacing
 
 Run from backend directory:
     python tests/test_text_processing.py
@@ -127,10 +129,93 @@ def test_lemmatization():
     print("PASSED: Lemmatization working correctly\n")
 
 
+def test_hyphenated_line_breaks():
+    """Test that hyphenated words split across lines are rejoined."""
+    print("=" * 60)
+    print("TEST 4: HYPHENATED LINE BREAK HANDLING")
+    print("=" * 60)
+
+    # Test case 1: Simple hyphenated word
+    text1 = "This is an algo-\nrithm for testing"
+    tokens1 = TextProcessor.clean_text(text1, remove_stopwords=False)
+    print(f"Input:  {repr(text1)}")
+    print(f"Output: {tokens1}")
+    assert "algorithm" in tokens1, "'algo-\\nrithm' should become 'algorithm'"
+    print("  Simple hyphenation: PASSED")
+
+    # Test case 2: Hyphenated word with spaces after newline
+    text2 = "machine-\n  learning is great"
+    tokens2 = TextProcessor.clean_text(text2, remove_stopwords=False)
+    print(f"\nInput:  {repr(text2)}")
+    print(f"Output: {tokens2}")
+    assert "machinelearning" in tokens2, "'machine-\\n  learning' should become 'machinelearning'"
+    print("  Hyphenation with spaces: PASSED")
+
+    # Test case 3: Multiple hyphenated words
+    text3 = "The algo-\nrithm uses deep-\nlearning techniques"
+    tokens3 = TextProcessor.clean_text(text3, remove_stopwords=False)
+    print(f"\nInput:  {repr(text3)}")
+    print(f"Output: {tokens3}")
+    assert "algorithm" in tokens3, "First hyphenated word should be rejoined"
+    assert "deeplearning" in tokens3, "Second hyphenated word should be rejoined"
+    print("  Multiple hyphenations: PASSED")
+
+    # Test case 4: No hyphenation (regular text unchanged)
+    text4 = "normal text without any breaks"
+    tokens4 = TextProcessor.clean_text(text4, remove_stopwords=False)
+    print(f"\nInput:  {repr(text4)}")
+    print(f"Output: {tokens4}")
+    assert tokens4 == ["normal", "text", "without", "any", "break"], "Regular text should be unchanged"
+    print("  Regular text unchanged: PASSED")
+
+    print("\nPASSED: Hyphenated line breaks handled correctly\n")
+
+
+def test_whitespace_normalization():
+    """Test that various whitespace is normalized to single spaces."""
+    print("=" * 60)
+    print("TEST 5: WHITESPACE NORMALIZATION")
+    print("=" * 60)
+
+    # Test case 1: Multiple spaces
+    text1 = "hello    world    test"
+    tokens1 = TextProcessor.clean_text(text1, remove_stopwords=False)
+    print(f"Input:  {repr(text1)}")
+    print(f"Output: {tokens1}")
+    assert tokens1 == ["hello", "world", "test"], "Multiple spaces should be normalized"
+    print("  Multiple spaces: PASSED")
+
+    # Test case 2: Tabs
+    text2 = "hello\tworld\ttest"
+    tokens2 = TextProcessor.clean_text(text2, remove_stopwords=False)
+    print(f"\nInput:  {repr(text2)}")
+    print(f"Output: {tokens2}")
+    assert tokens2 == ["hello", "world", "test"], "Tabs should be normalized"
+    print("  Tabs: PASSED")
+
+    # Test case 3: Newlines (without hyphens)
+    text3 = "hello\nworld\ntest"
+    tokens3 = TextProcessor.clean_text(text3, remove_stopwords=False)
+    print(f"\nInput:  {repr(text3)}")
+    print(f"Output: {tokens3}")
+    assert tokens3 == ["hello", "world", "test"], "Newlines should be normalized"
+    print("  Newlines: PASSED")
+
+    # Test case 4: Mixed whitespace
+    text4 = "hello  \n\t  world   \n   test"
+    tokens4 = TextProcessor.clean_text(text4, remove_stopwords=False)
+    print(f"\nInput:  {repr(text4)}")
+    print(f"Output: {tokens4}")
+    assert tokens4 == ["hello", "world", "test"], "Mixed whitespace should be normalized"
+    print("  Mixed whitespace: PASSED")
+
+    print("\nPASSED: Whitespace normalization working correctly\n")
+
+
 def test_ngram_generation():
     """Test n-gram generation."""
     print("=" * 60)
-    print("TEST 4: N-GRAM GENERATION")
+    print("TEST 6: N-GRAM GENERATION")
     print("=" * 60)
 
     tokens = ["the", "quick", "brown", "fox", "jumps"]
@@ -157,7 +242,7 @@ def test_ngram_generation():
 def test_full_preprocessing_pipeline():
     """Test the complete preprocessing pipeline used for TF-IDF."""
     print("=" * 60)
-    print("TEST 5: FULL PREPROCESSING PIPELINE (preprocess_for_tfidf)")
+    print("TEST 7: FULL PREPROCESSING PIPELINE (preprocess_for_tfidf)")
     print("=" * 60)
 
     text = "The researchers are studying machine learning algorithms for natural language processing tasks."
@@ -181,10 +266,42 @@ def test_full_preprocessing_pipeline():
     print("PASSED: Full pipeline working correctly\n")
 
 
+def test_full_pipeline_with_hyphenation():
+    """Test the full pipeline with hyphenated text (simulating PDF extraction)."""
+    print("=" * 60)
+    print("TEST 8: FULL PIPELINE WITH HYPHENATED TEXT")
+    print("=" * 60)
+
+    # Simulate text extracted from a PDF with hyphenated line breaks
+    text = """The research-
+ers developed a new algo-
+rithm for natural lan-
+guage processing tasks."""
+
+    result = TextProcessor.preprocess_for_tfidf(text)
+
+    print(f"Input text: {repr(text)}")
+    print(f"\nGenerated n-grams ({len(result)} total):")
+    for ngram in result:
+        print(f"  '{ngram}'")
+
+    # Check that hyphenated words were properly rejoined
+    all_ngrams_str = ' '.join(result)
+    assert 'researcher' in all_ngrams_str or 'research' in all_ngrams_str, "researchers should be rejoined"
+    assert 'algorithm' in all_ngrams_str, "algorithm should be rejoined"
+    assert 'language' in all_ngrams_str, "language should be rejoined"
+
+    # Should NOT contain broken word fragments
+    assert 'algo' not in result, "'algo' fragment should not appear"
+    assert 'rithm' not in result, "'rithm' fragment should not appear"
+
+    print("PASSED: Full pipeline handles hyphenated text correctly\n")
+
+
 def test_edge_cases():
     """Test edge cases and special inputs."""
     print("=" * 60)
-    print("TEST 6: EDGE CASES")
+    print("TEST 9: EDGE CASES")
     print("=" * 60)
 
     # Empty string
@@ -212,6 +329,18 @@ def test_edge_cases():
     assert result == [], "Should return empty list when tokens < n"
     print("  Short text n-gram: PASSED")
 
+    # Only whitespace
+    result = TextProcessor.clean_text("   \n\t   ", remove_stopwords=False)
+    assert result == [], "Only whitespace should return empty list"
+    print("  Only whitespace: PASSED")
+
+    # Hyphen at end without continuation (edge case)
+    result = TextProcessor.clean_text("test- word", remove_stopwords=False)
+    # The hyphen should be removed but words stay separate (no newline to trigger join)
+    assert "test" in result, "test should be present"
+    assert "word" in result, "word should be present"
+    print("  Hyphen without newline: PASSED")
+
     print("\nAll edge cases passed!\n")
 
 
@@ -219,15 +348,19 @@ def run_all_tests():
     """Run all tests and provide summary."""
     print("\n" + "=" * 60)
     print("TEXT PROCESSING TEST SUITE")
-    print("Testing: Tokenization, Stopword Removal, Lemmatization")
+    print("Testing: Tokenization, Stopword Removal, Lemmatization,")
+    print("         Hyphenation Handling, Whitespace Normalization")
     print("=" * 60 + "\n")
 
     try:
         test_tokenization()
         test_stopword_removal()
         test_lemmatization()
+        test_hyphenated_line_breaks()
+        test_whitespace_normalization()
         test_ngram_generation()
         test_full_preprocessing_pipeline()
+        test_full_pipeline_with_hyphenation()
         test_edge_cases()
 
         print("=" * 60)
@@ -237,7 +370,9 @@ def run_all_tests():
         print("  1. Tokenization (splitting text into words)")
         print("  2. Stopword removal (filtering common words)")
         print("  3. Lemmatization (reducing to base forms)")
-        print("  4. N-gram generation (bigrams + trigrams)")
+        print("  4. Hyphenated line break handling (rejoining split words)")
+        print("  5. Whitespace normalization (consistent spacing)")
+        print("  6. N-gram generation (bigrams + trigrams)")
 
     except AssertionError as e:
         print(f"\nTEST FAILED: {e}")

@@ -21,7 +21,7 @@ _admin_cache = {
     'stats': {'data': None, 'last_updated': 0},
     'corpus_growth': {} # keyed by timeframe
 }
-CACHE_TTL = 60 # seconds
+CACHE_TTL = 10 # Lower seconds refreshes cache sooner 
 
 # ========== submission endpoints ===========
 
@@ -62,8 +62,8 @@ def upload_submission():
         return jsonify({'error': 'File too large'}), 400
     
     try:
-        # Extract text from file
-        content_text = extract_text(str(file_path), file_ext)
+        # Extract text from file (use fast_mode=True to match corpus ingestion method)
+        content_text = extract_text(str(file_path), file_ext, fast_mode=True)
         
         # Create submission record
         submission_id = Submission.create(
@@ -303,8 +303,8 @@ def upload_corpus_paper():
         return jsonify({'error': 'File too large'}), 400
     
     try:
-        # Extract text
-        content_text = extract_text(str(file_path), file_ext)
+        # Extract text (use fast_mode=True to match corpus ingestion method)
+        content_text = extract_text(str(file_path), file_ext, fast_mode=True)
         
         # Create paper record
         paper_id = Paper.create(
