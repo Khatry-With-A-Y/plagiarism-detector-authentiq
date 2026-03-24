@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
+import Results from './Results';
 import '../dashboard.css';
 
 function UserDashboard() {
@@ -21,9 +22,39 @@ function UserDashboard() {
   const [submissionToDelete, setSubmissionToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [openTabs, setOpenTabs] = useState([]);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [showLeftScroll, setShowLeftScroll] = useState(false);
+  const [showRightScroll, setShowRightScroll] = useState(false);
   const itemsPerPage = 5;
   const fileInputRef = useRef(null);
+  const navTabsContainerRef = useRef(null);
   const navigate = useNavigate();
+
+  const checkScrollability = () => {
+    if (navTabsContainerRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = navTabsContainerRef.current;
+      setShowLeftScroll(scrollLeft > 0);
+      setShowRightScroll(scrollLeft < scrollWidth - clientWidth - 1);
+    }
+  };
+
+  useEffect(() => {
+    checkScrollability();
+    window.addEventListener('resize', checkScrollability);
+    return () => window.removeEventListener('resize', checkScrollability);
+  }, [openTabs, activeTab]);
+
+  const scrollTabs = (direction) => {
+    if (navTabsContainerRef.current) {
+      const scrollAmount = 200;
+      navTabsContainerRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+      setTimeout(checkScrollability, 300); // Check after smooth scroll animation
+    }
+  };
 
   useEffect(() => {
     if (!user) {
@@ -157,8 +188,21 @@ function UserDashboard() {
     navigate('/login');
   };
 
-  const handleViewReport = (submissionId) => {
-    navigate(`/results/${submissionId}`);
+  const handleViewReport = (submission) => {
+    const exists = openTabs.find(tab => tab.id === submission.id);
+    if (!exists) {
+      setOpenTabs([...openTabs, { id: submission.id, name: submission.filename }]);
+    }
+    setActiveTab(submission.id);
+  };
+
+  const closeTab = (e, tabId) => {
+    e.stopPropagation();
+    const newTabs = openTabs.filter(tab => tab.id !== tabId);
+    setOpenTabs(newTabs);
+    if (activeTab === tabId) {
+      setActiveTab(newTabs.length > 0 ? newTabs[newTabs.length - 1].id : 'dashboard');
+    }
   };
 
   const getRiskLevel = (similarity) => {
@@ -271,8 +315,8 @@ function UserDashboard() {
     <div className="dashboard">
       {/* Navbar */}
       <nav className="dashboard-navbar">
-        <div className="dashboard-navbar-left">
-          <Link to="/" className="dashboard-logo">
+        <div className="dashboard-navbar-left" style={{ flex: 1, minWidth: 0 }}>
+          <Link to="/" className="dashboard-logo" style={{ flexShrink: 0 }}>
             <svg className="dashboard-logo-icon" viewBox="0 0 24 24" fill="none">
               <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="currentColor" opacity="0.2"/>
               <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
@@ -280,24 +324,80 @@ function UserDashboard() {
             </svg>
             <span className="dashboard-logo-text">Authentiq</span>
           </Link>
-          <div className="dashboard-nav-links">
-            <Link to="/dashboard" className="dashboard-nav-link active">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7"/>
-                <rect x="14" y="3" width="7" height="7"/>
-                <rect x="14" y="14" width="7" height="7"/>
-                <rect x="3" y="14" width="7" height="7"/>
-              </svg>
-              Dashboard
-            </Link>
-            <Link to="/my-statistics" className="dashboard-nav-link">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="18" y1="20" x2="18" y2="10"/>
-                <line x1="12" y1="20" x2="12" y2="4"/>
-                <line x1="6" y1="20" x2="6" y2="14"/>
-              </svg>
-              User Statistics
-            </Link>
+          <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', flexShrink: 0 }}>
+              <button 
+                className={`dashboard-nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
+                onClick={() => setActiveTab('dashboard')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="7" height="7"/>
+                  <rect x="14" y="3" width="7" height="7"/>
+                  <rect x="14" y="14" width="7" height="7"/>
+                  <rect x="3" y="14" width="7" height="7"/>
+                </svg>
+                Dashboard
+              </button>
+              <Link to="/my-statistics" className="dashboard-nav-link">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="20" x2="18" y2="10"/>
+                  <line x1="12" y1="20" x2="12" y2="4"/>
+                  <line x1="6" y1="20" x2="6" y2="14"/>
+                </svg>
+                User Statistics
+              </Link>
+            </div>
+            {showLeftScroll && (
+              <button 
+                onClick={() => scrollTabs('left')} 
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 8px', flexShrink: 0, color: 'var(--text-secondary, #6b7280)' }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 18l-6-6 6-6"/>
+                </svg>
+              </button>
+            )}
+            <div 
+              className="dashboard-nav-links" 
+              ref={navTabsContainerRef}
+              onScroll={checkScrollability}
+              style={{ display: 'flex', overflowX: 'auto', flexWrap: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none', flex: 1, scrollBehavior: 'smooth' }}
+            >
+              <style>{`.dashboard-nav-links::-webkit-scrollbar { display: none; }`}</style>
+              {openTabs.map(tab => (
+                <div 
+                  key={tab.id} 
+                  className={`dashboard-nav-link ${activeTab === tab.id ? 'active' : ''}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', maxWidth: '150px', flexShrink: 0, paddingRight: '8px' }}
+                  title={tab.name}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {tab.name}
+                  </span>
+                  <button 
+                    onClick={(e) => closeTab(e, tab.id)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'inherit', marginLeft: 'auto' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+            {showRightScroll && (
+              <button 
+                onClick={() => scrollTabs('right')} 
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 8px', flexShrink: 0, color: 'var(--text-secondary, #6b7280)' }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 18l6-6-6-6"/>
+                </svg>
+              </button>
+            )}
           </div>
         </div>
         <div className="dashboard-navbar-right">
@@ -335,6 +435,9 @@ function UserDashboard() {
       </nav>
 
       {/* Main Content */}
+      {activeTab !== 'dashboard' ? (
+        <Results id={activeTab} isEmbedded={true} />
+      ) : (
       <main className="dashboard-main">
         {/* Welcome Section */}
         <section className="dashboard-welcome">
@@ -571,7 +674,7 @@ function UserDashboard() {
                         <td className="dashboard-actions-cell">
                           <button
                             className="dashboard-view-link"
-                            onClick={() => handleViewReport(submission.id)}
+                            onClick={() => handleViewReport(submission)}
                           >
                             View Report
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -685,6 +788,7 @@ function UserDashboard() {
           </div>
         </section>
       </main>
+      )}
 
       {/* Footer */}
       <footer className="dashboard-footer">

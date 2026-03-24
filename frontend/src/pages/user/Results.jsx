@@ -4,8 +4,9 @@ import useAuth from '../../hooks/useAuth';
 import useFetchResults from '../../hooks/useFetchResults';
 import '../dashboard.css';
 
-function Results() {
-  const { id } = useParams();
+function Results({ id: propId, isEmbedded }) {
+  const { id: paramId } = useParams();
+  const id = propId || paramId;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { results, submission, loading, error, refresh } = useFetchResults(id);
@@ -42,8 +43,9 @@ function Results() {
   }
 
   return (
-    <div className="dashboard">
-      {/* Navbar */}
+    <div className={isEmbedded ? "" : "dashboard"}>
+      {/* Navbar - hide if embedded */}
+      {!isEmbedded && (
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
           <Link to="/dashboard" className="dashboard-logo">
@@ -65,10 +67,12 @@ function Results() {
           </div>
         </div>
       </nav>
+      )}
 
       {/* Main Content */}
-      <main className="dashboard-main">
-        {/* Back Button */}
+      <main className={isEmbedded ? "" : "dashboard-main"} style={isEmbedded ? { padding: 0 } : {}}>
+        {/* Back Button - hide if embedded */}
+        {!isEmbedded && (
         <button
           onClick={() => navigate('/dashboard')}
           style={{
@@ -90,6 +94,7 @@ function Results() {
           </svg>
           Back to Dashboard
         </button>
+        )}
 
         {error ? (
           <div className="dashboard-reports" style={{ textAlign: 'center', padding: '48px' }}>
