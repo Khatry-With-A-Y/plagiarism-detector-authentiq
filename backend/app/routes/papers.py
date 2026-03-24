@@ -87,7 +87,8 @@ def upload_submission():
                 'id': submission['id'],
                 'filename': submission['filename'],
                 'status': submission['status'],
-                'uploaded_at': submission['uploaded_at']
+                'uploaded_at': submission['uploaded_at'],
+                'file_size': submission.get('file_size', 0)
             }
         }), 201
     except Exception as e:
@@ -114,6 +115,7 @@ def get_submissions():
             'filename': s['filename'],
             'status': s['status'],
             'uploaded_at': s['uploaded_at'],
+            'file_size': s.get('file_size', 0),
             'similarity_score': round(max_similarity * 100, 2)  # Convert to percentage
         })
 

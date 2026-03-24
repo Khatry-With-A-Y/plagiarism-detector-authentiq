@@ -202,7 +202,16 @@ class Submission:
         cursor.execute('SELECT * FROM submissions WHERE id = ?', (submission_id,))
         submission = cursor.fetchone()
         conn.close()
-        return dict(submission) if submission else None
+        
+        if submission:
+            sub_dict = dict(submission)
+            try:
+                import os
+                sub_dict['file_size'] = os.path.getsize(sub_dict['file_path'])
+            except OSError:
+                sub_dict['file_size'] = 0
+            return sub_dict
+        return None
     
     @staticmethod
     def get_by_user(user_id):
@@ -216,6 +225,14 @@ class Submission:
         ''', (user_id,))
         submissions = [dict(row) for row in cursor.fetchall()]
         conn.close()
+        
+        import os
+        for sub in submissions:
+            try:
+                sub['file_size'] = os.path.getsize(sub['file_path'])
+            except OSError:
+                sub['file_size'] = 0
+                
         return submissions
     
     @staticmethod
