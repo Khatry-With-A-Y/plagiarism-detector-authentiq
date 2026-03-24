@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 from ...config import DATABASE_PATH
@@ -122,6 +123,60 @@ def init_database():
 
     conn.close()
     print(f"Database initialized at {DATABASE_PATH}")
+
+    # Ensure all papers have preprocessed n-grams
+    ensure_preprocessed_ngrams()
+
+
+def ensure_preprocessed_ngrams():
+    """Backfill preprocessed n-grams for papers missing them.
+
+    Called automatically during init_database() to ensure all existing papers
+    have cached n-grams for fast similarity calculations.
+    Safe to run multiple times (idempotent).
+    """
+    from .text_processing import TextProcessor
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Find papers without preprocessed n-grams
+    cursor.execute('''
+        SELECT id, content_text
+        FROM papers
+        WHERE content_text IS NOT NULL
+          AND (preprocessed_ngrams IS NULL OR preprocessed_ngrams = '')
+    ''')
+    papers = cursor.fetchall()
+    conn.close()
+
+    if not papers:
+        return
+
+    print(f"Backfilling n-grams for {len(papers)} papers...")
+
+    updated = 0
+    for paper in papers:
+        paper_id = paper['id']
+        content_text = paper['content_text']
+
+        try:
+            ngrams = TextProcessor.preprocess_for_tfidf(content_text)
+            ngrams_json = json.dumps(ngrams)
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                'UPDATE papers SET preprocessed_ngrams = ? WHERE id = ?',
+                (ngrams_json, paper_id)
+            )
+            conn.commit()
+            conn.close()
+            updated += 1
+        except Exception as e:
+            print(f"  Warning: Failed to compute n-grams for paper {paper_id}: {e}")
+
+    print(f"Backfilled n-grams for {updated} papers")
 
 
 if __name__ == '__main__':

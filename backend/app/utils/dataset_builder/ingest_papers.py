@@ -25,6 +25,7 @@ sys.path.insert(0, project_root)
 # ── Imports from the project ───────────────────────────────────────────
 from backend.app.utils.file_processor import extract_text
 from backend.app.utils.database import get_db_connection, init_database
+from backend.app.utils.text_processing import TextProcessor
 
 # ── Configuration ──────────────────────────────────────────────────────
 ADMIN_USER_ID = 1
@@ -63,17 +64,20 @@ def get_existing_filenames():
 
 
 def extract_single_pdf(args):
-    """Worker function: extract text from a single PDF. Runs in separate process."""
+    """Worker function: extract text and compute n-grams from a single PDF. Runs in separate process."""
     filename, pdf_path = args
     try:
         # Use fast_mode=True for remaining stubborn PDFs that hang column_boxes
         content_text = extract_text(pdf_path, '.pdf', fast_mode=True)
         if content_text and content_text.strip():
-            return {'filename': filename, 'content': content_text, 'error': None}
+            # Compute n-grams for similarity caching
+            ngrams = TextProcessor.preprocess_for_tfidf(content_text)
+            ngrams_json = json.dumps(ngrams) if ngrams else None
+            return {'filename': filename, 'content': content_text, 'ngrams': ngrams_json, 'error': None}
         else:
-            return {'filename': filename, 'content': None, 'error': 'empty'}
+            return {'filename': filename, 'content': None, 'ngrams': None, 'error': 'empty'}
     except Exception as e:
-        return {'filename': filename, 'content': None, 'error': str(e)[:100]}
+        return {'filename': filename, 'content': None, 'ngrams': None, 'error': str(e)[:100]}
 
 
 def ingest():
@@ -173,9 +177,9 @@ def ingest():
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute(
-                '''INSERT INTO papers (title, author, filename, file_path, content_text, uploaded_by)
-                   VALUES (?, ?, ?, ?, ?, ?)''',
-                (title, author_str, filename, os.path.join(pdf_dir, filename), result['content'], ADMIN_USER_ID)
+                '''INSERT INTO papers (title, author, filename, file_path, content_text, preprocessed_ngrams, uploaded_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (title, author_str, filename, os.path.join(pdf_dir, filename), result['content'], result['ngrams'], ADMIN_USER_ID)
             )
             conn.commit()
             conn.close()
