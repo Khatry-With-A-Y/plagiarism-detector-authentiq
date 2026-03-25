@@ -4,7 +4,7 @@ import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import './userStatistics.css';
 
-function UserStatistics() {
+function UserStatistics({ isEmbedded = false }) {
   const { user, logout, isAdmin } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [submissions, setSubmissions] = useState([]);
@@ -184,6 +184,7 @@ function UserStatistics() {
   return (
     <div className="user-statistics">
       {/* Navbar */}
+      {!isEmbedded && (
       <nav className="ustats-navbar">
         <div className="ustats-navbar-left">
           <Link to="/" className="ustats-logo">
@@ -260,6 +261,7 @@ function UserStatistics() {
           </div>
         </div>
       </nav>
+      )}
 
       {/* Main Content */}
       <main className="ustats-main">

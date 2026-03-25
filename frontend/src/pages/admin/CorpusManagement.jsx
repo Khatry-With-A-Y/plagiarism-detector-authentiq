@@ -4,7 +4,7 @@ import { corpusAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import '../dashboard.css';
 
-function CorpusManagement() {
+function CorpusManagement({ isEmbedded = false }) {
   const { user, logout, isAdmin } = useAuth();
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -140,6 +140,7 @@ function CorpusManagement() {
   return (
     <div className="dashboard">
       {/* Navbar */}
+      {!isEmbedded && (
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
           <Link to="/" className="dashboard-logo">
@@ -211,6 +212,7 @@ function CorpusManagement() {
           </div>
         </div>
       </nav>
+      )}
 
       {/* Main Content */}
       <main className="dashboard-main">

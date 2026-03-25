@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import Results from './Results';
+import UserStatistics from './UserStatistics';
 import '../dashboard.css';
 
 function UserDashboard() {
@@ -40,9 +41,15 @@ function UserDashboard() {
   };
 
   useEffect(() => {
-    checkScrollability();
+    // Use requestAnimationFrame to ensure DOM has updated before checking
+    const rafId = requestAnimationFrame(() => {
+      checkScrollability();
+    });
     window.addEventListener('resize', checkScrollability);
-    return () => window.removeEventListener('resize', checkScrollability);
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', checkScrollability);
+    };
   }, [openTabs, activeTab]);
 
   const scrollTabs = (direction) => {
@@ -194,6 +201,17 @@ function UserDashboard() {
       setOpenTabs([...openTabs, { id: submission.id, name: submission.filename }]);
     }
     setActiveTab(submission.id);
+    // Scroll the tab into view after DOM updates
+    setTimeout(() => {
+      const container = navTabsContainerRef.current;
+      if (container) {
+        const tabElement = container.querySelector(`[data-tab-id="${submission.id}"]`);
+        if (tabElement) {
+          tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+          setTimeout(checkScrollability, 300);
+        }
+      }
+    }, 50);
   };
 
   const closeTab = (e, tabId) => {
@@ -339,21 +357,47 @@ function UserDashboard() {
                 </svg>
                 Dashboard
               </button>
-              <Link to="/my-statistics" className="dashboard-nav-link">
+              <button
+                className={`dashboard-nav-link ${activeTab === 'statistics' ? 'active' : ''}`}
+                onClick={() => setActiveTab('statistics')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="20" x2="18" y2="10"/>
                   <line x1="12" y1="20" x2="12" y2="4"/>
                   <line x1="6" y1="20" x2="6" y2="14"/>
                 </svg>
-                User Statistics
-              </Link>
+                My Statistics
+              </button>
             </div>
             {showLeftScroll && (
-              <button 
-                onClick={() => scrollTabs('left')} 
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 8px', flexShrink: 0, color: 'var(--text-secondary, #6b7280)' }}
+              <button
+                onClick={() => scrollTabs('left')}
+                className="dashboard-tab-scroll-btn"
+                style={{
+                  background: 'var(--bg-secondary, #f1f5f9)',
+                  border: '1px solid var(--border-color, #e2e8f0)',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  padding: '4px 6px',
+                  marginRight: '4px',
+                  flexShrink: 0,
+                  color: 'var(--text-secondary, #6b7280)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-tertiary, #e2e8f0)';
+                  e.currentTarget.style.color = 'var(--text-primary, #1e293b)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-secondary, #f1f5f9)';
+                  e.currentTarget.style.color = 'var(--text-secondary, #6b7280)';
+                }}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M15 18l-6-6 6-6"/>
                 </svg>
               </button>
@@ -366,8 +410,9 @@ function UserDashboard() {
             >
               <style>{`.dashboard-nav-links::-webkit-scrollbar { display: none; }`}</style>
               {openTabs.map(tab => (
-                <div 
-                  key={tab.id} 
+                <div
+                  key={tab.id}
+                  data-tab-id={tab.id}
                   className={`dashboard-nav-link ${activeTab === tab.id ? 'active' : ''}`}
                   onClick={() => setActiveTab(tab.id)}
                   style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', maxWidth: '150px', flexShrink: 0, paddingRight: '8px' }}
@@ -389,11 +434,33 @@ function UserDashboard() {
               ))}
             </div>
             {showRightScroll && (
-              <button 
-                onClick={() => scrollTabs('right')} 
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 8px', flexShrink: 0, color: 'var(--text-secondary, #6b7280)' }}
+              <button
+                onClick={() => scrollTabs('right')}
+                className="dashboard-tab-scroll-btn"
+                style={{
+                  background: 'var(--bg-secondary, #f1f5f9)',
+                  border: '1px solid var(--border-color, #e2e8f0)',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  padding: '4px 6px',
+                  marginLeft: '4px',
+                  flexShrink: 0,
+                  color: 'var(--text-secondary, #6b7280)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-tertiary, #e2e8f0)';
+                  e.currentTarget.style.color = 'var(--text-primary, #1e293b)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-secondary, #f1f5f9)';
+                  e.currentTarget.style.color = 'var(--text-secondary, #6b7280)';
+                }}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 18l6-6-6-6"/>
                 </svg>
               </button>
@@ -435,7 +502,9 @@ function UserDashboard() {
       </nav>
 
       {/* Main Content */}
-      {activeTab !== 'dashboard' ? (
+      {activeTab === 'statistics' ? (
+        <UserStatistics isEmbedded={true} />
+      ) : activeTab !== 'dashboard' ? (
         <Results id={activeTab} isEmbedded={true} />
       ) : (
       <main className="dashboard-main">

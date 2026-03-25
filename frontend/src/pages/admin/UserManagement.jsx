@@ -5,7 +5,7 @@ import { adminAPI } from '../../api/results';
 import '../dashboard.css';
 import './userManagement.css';
 
-function UserManagement() {
+function UserManagement({ isEmbedded = false }) {
   const { user, logout } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState([]);
@@ -75,6 +75,7 @@ function UserManagement() {
   return (
     <div className="dashboard">
       {/* Navbar */}
+      {!isEmbedded && (
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
           <Link to="/" className="dashboard-logo">
@@ -146,6 +147,7 @@ function UserManagement() {
           </div>
         </div>
       </nav>
+      )}
 
       {/* Main Content */}
       <main className="dashboard-main">

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { adminAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
+import CorpusManagement from './CorpusManagement';
+import UserManagement from './UserManagement';
 import '../dashboard.css';
 import './adminStatistics.css';
 
@@ -20,6 +22,7 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [dateRange] = useState('Last 30 Days');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const navigate = useNavigate();
 
   const fetchStats = useCallback(async () => {
@@ -168,7 +171,11 @@ function AdminDashboard() {
             <span className="dashboard-logo-text">Authentiq</span>
           </Link>
           <div className="dashboard-nav-links">
-            <Link to="/dashboard" className="dashboard-nav-link active">
+            <button
+              className={`dashboard-nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setActiveTab('dashboard')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="7" height="7"/>
                 <rect x="14" y="3" width="7" height="7"/>
@@ -176,8 +183,12 @@ function AdminDashboard() {
                 <rect x="3" y="14" width="7" height="7"/>
               </svg>
               Admin Dashboard
-            </Link>
-            <Link to="/users" className="dashboard-nav-link">
+            </button>
+            <button
+              className={`dashboard-nav-link ${activeTab === 'users' ? 'active' : ''}`}
+              onClick={() => setActiveTab('users')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
                 <circle cx="9" cy="7" r="4"></circle>
@@ -185,14 +196,18 @@ function AdminDashboard() {
                 <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
               </svg>
               User Management
-            </Link>
-            <Link to="/admin" className="dashboard-nav-link">
+            </button>
+            <button
+              className={`dashboard-nav-link ${activeTab === 'corpus' ? 'active' : ''}`}
+              onClick={() => setActiveTab('corpus')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
               </svg>
               Corpus Management
-            </Link>
+            </button>
           </div>
         </div>
         <div className="dashboard-navbar-right">
@@ -230,6 +245,11 @@ function AdminDashboard() {
       </nav>
 
       {/* Main Content */}
+      {activeTab === 'corpus' ? (
+        <CorpusManagement isEmbedded={true} />
+      ) : activeTab === 'users' ? (
+        <UserManagement isEmbedded={true} />
+      ) : (
       <main className="dashboard-main">
         {/* Header */}
         <div className="stats-header" style={{ marginBottom: '2rem' }}>
@@ -497,6 +517,7 @@ function AdminDashboard() {
           </div>
         </section>
       </main>
+      )}
 
       {/* Footer */}
       <footer className="dashboard-footer">
