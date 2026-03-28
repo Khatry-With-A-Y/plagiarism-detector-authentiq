@@ -97,7 +97,14 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_results_submission ON similarity_results(submission_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_results_paper ON similarity_results(paper_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_results_score ON similarity_results(similarity_score DESC)')
-    
+
+    # Migration: Add match_details column for sentence-level highlighting
+    cursor.execute("PRAGMA table_info(similarity_results)")
+    results_columns = [col['name'] for col in cursor.fetchall()]
+    if 'match_details' not in results_columns:
+        cursor.execute("ALTER TABLE similarity_results ADD COLUMN match_details TEXT")
+        print("Added match_details column to similarity_results table")
+
     conn.commit()
     # seed a default account if none exist
     from ..models.models import User

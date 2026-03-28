@@ -1,5 +1,6 @@
 import re
 import functools
+from typing import List, Dict
 import nltk
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet
@@ -99,3 +100,58 @@ class TextProcessor:
         bigrams = TextProcessor.generate_ngrams(tokens, 2)
         trigrams = TextProcessor.generate_ngrams(tokens, 3)
         return bigrams + trigrams
+
+    @classmethod
+    def split_into_sentences(cls, text: str, max_sentences: int = 500) -> List[Dict]:
+        """
+        Split text into sentences with position info.
+
+        Args:
+            text: The text to split
+            max_sentences: Maximum number of sentences to return (for performance)
+
+        Returns:
+            List of dicts: [{'text': str, 'start': int, 'end': int, 'index': int}, ...]
+        """
+        if not text or not text.strip():
+            return []
+
+        # Normalize whitespace but preserve positions
+        # First, find sentence boundaries using regex
+        # Pattern handles: periods, exclamation, question marks followed by space and capital
+        # Also handles end of text
+
+        sentences = []
+
+        # Split on sentence-ending punctuation followed by whitespace
+        # This pattern handles most common cases while avoiding splits on abbreviations like "Dr." or "U.S."
+        pattern = r'(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])$'
+
+        # Find all split positions
+        parts = re.split(pattern, text)
+
+        current_pos = 0
+        for idx, part in enumerate(parts):
+            if idx >= max_sentences:
+                break
+
+            part = part.strip()
+            if not part:
+                continue
+
+            # Find actual position in original text
+            start = text.find(part, current_pos)
+            if start == -1:
+                start = current_pos
+            end = start + len(part)
+
+            sentences.append({
+                'text': part,
+                'start': start,
+                'end': end,
+                'index': len(sentences)
+            })
+
+            current_pos = end
+
+        return sentences

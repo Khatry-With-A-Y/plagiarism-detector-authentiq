@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from pathlib import Path
@@ -12,6 +13,7 @@ from ..utils.auth import get_current_user, require_auth, require_admin
 from ..utils.file_processor import extract_text, validate_file
 from ..utils.cosine import process_submission_with_cached_idf
 from ..utils.corpus_cache import get_corpus_cache
+from ..utils.sentence_matcher import compute_sentence_matches
 
 papers_bp = Blueprint('papers', __name__, url_prefix='/api')
 
@@ -109,6 +111,20 @@ def get_submissions():
         # Get max similarity score for this submission
         results = SimilarityResult.get_by_submission(s['id'])
         max_similarity = max((r['similarity_score'] for r in results), default=0) if results else 0
+        
+        highest_exact_match = 0
+        if results:
+            import json
+            for r in results:
+                match_details_str = r.get('match_details')
+                if match_details_str:
+                    try:
+                        md = json.loads(match_details_str)
+                        score = md.get('highest_match_score', 0)
+                        if score > highest_exact_match:
+                            highest_exact_match = score
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
         result.append({
             'id': s['id'],
@@ -116,7 +132,8 @@ def get_submissions():
             'status': s['status'],
             'uploaded_at': s['uploaded_at'],
             'file_size': s.get('file_size', 0),
-            'similarity_score': round(max_similarity * 100, 2)  # Convert to percentage
+            'similarity_score': round(max_similarity * 100, 2),  # Convert to percentage
+            'highest_exact_match': round(highest_exact_match * 100, 2)
         })
 
     return jsonify({'submissions': result}), 200
@@ -180,30 +197,43 @@ def get_submission_results(submission_id):
     """Get similarity results for a submission"""
     user = get_current_user()
     submission = Submission.get_by_id(submission_id)
-    
+
     if not submission:
         return jsonify({'error': 'Submission not found'}), 404
-    
+
     # Check ownership (unless admin)
     if submission['user_id'] != user['id'] and user['role'] != 'admin':
         return jsonify({'error': 'Access denied'}), 403
-    
+
     results = SimilarityResult.get_by_submission(submission_id)
-    
+
+    # Parse match_details JSON for each result
+    formatted_results = []
+    for r in results:
+        result_dict = {
+            'paper_id': r['paper_id'],
+            'title': r['title'],
+            'author': r['author'],
+            'filename': r['filename'],
+            'similarity_score': round(r['similarity_score'], 4)
+        }
+        # Include match_details if available
+        if r.get('match_details'):
+            try:
+                result_dict['match_details'] = json.loads(r['match_details'])
+            except (json.JSONDecodeError, TypeError):
+                result_dict['match_details'] = None
+        else:
+            result_dict['match_details'] = None
+        formatted_results.append(result_dict)
+
     return jsonify({
         'submission_id': submission_id,
         'filename': submission['filename'],
         'status': submission['status'],
-        'results': [
-            {
-                'paper_id': r['paper_id'],
-                'title': r['title'],
-                'author': r['author'],
-                'filename': r['filename'],
-                'similarity_score': round(r['similarity_score'], 4)
-            }
-            for r in results
-        ]
+        'submission_text': submission.get('content_text', ''),  # Include for highlighting
+        'results': formatted_results,
+        'documents_compared': len(formatted_results)
     }), 200
 
 
@@ -262,6 +292,35 @@ def process_submission_analysis(submission_id):
         # Save results
         result_tuples = [(r['paper_id'], r['similarity_score']) for r in results]
         SimilarityResult.create_batch(submission_id, result_tuples)
+
+        # Compute and store sentence-level matches for top 10 sources
+        top_results = results[:10]
+        if top_results and submission['content_text']:
+            # Build a map of paper_id -> content_text for top sources
+            paper_ids = [r['paper_id'] for r in top_results]
+            papers = {p['id']: p for p in [Paper.get_by_id(pid) for pid in paper_ids] if p}
+
+            for result in top_results:
+                paper = papers.get(result['paper_id'])
+                if not paper or not paper.get('content_text'):
+                    continue
+
+                try:
+                    match_details = compute_sentence_matches(
+                        submission['content_text'],
+                        paper['content_text'],
+                        cached_idf,
+                        threshold=0.3,
+                        top_n=20
+                    )
+                    match_details_json = json.dumps(match_details)
+                    SimilarityResult.update_match_details(
+                        submission_id,
+                        result['paper_id'],
+                        match_details_json
+                    )
+                except Exception as e:
+                    print(f"Warning: Failed to compute sentence matches for paper {result['paper_id']}: {e}")
 
         Submission.update_status(submission_id, 'completed')
     except Exception as e:

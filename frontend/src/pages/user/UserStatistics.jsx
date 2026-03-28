@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
+import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
 import './userStatistics.css';
 
 function UserStatistics({ isEmbedded = false }) {
@@ -152,18 +153,6 @@ function UserStatistics({ isEmbedded = false }) {
   };
 
   const originalityTrendData = generateOriginalityTrend();
-
-  const getRiskLevel = (similarity) => {
-    if (similarity < 15) return 'low';
-    if (similarity < 40) return 'medium';
-    return 'high';
-  };
-
-  const getRiskLabel = (similarity) => {
-    if (similarity < 15) return 'Low Risk';
-    if (similarity < 40) return 'Medium Risk';
-    return 'High Risk';
-  };
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -534,7 +523,7 @@ function UserStatistics({ isEmbedded = false }) {
             <div className="ustats-activity-list">
               {recentActivity.map((submission) => {
                 const similarity = submission.similarity_score || 0;
-                const riskLevel = getRiskLevel(similarity);
+                const riskLevel = calculateRiskLevel(similarity);
                 return (
                   <div key={submission.id} className="ustats-activity-item">
                     <div className="ustats-activity-icon">
@@ -554,7 +543,7 @@ function UserStatistics({ isEmbedded = false }) {
                             {similarity.toFixed(0)}%
                           </span>
                           <span className={`ustats-activity-risk ${riskLevel}`}>
-                            {getRiskLabel(similarity)}
+                            {getRiskLabel(riskLevel)}
                           </span>
                         </>
                       ) : (

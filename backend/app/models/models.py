@@ -286,10 +286,23 @@ class SimilarityResult:
         ''', [(submission_id, paper_id, score) for paper_id, score in results])
         conn.commit()
         conn.close()
-    
+
+    @staticmethod
+    def update_match_details(submission_id, paper_id, match_details_json):
+        """Update match_details for a specific similarity result"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE similarity_results
+            SET match_details = ?
+            WHERE submission_id = ? AND paper_id = ?
+        ''', (match_details_json, submission_id, paper_id))
+        conn.commit()
+        conn.close()
+
     @staticmethod
     def get_by_submission(submission_id):
-        """Get all similarity results for a submission, ordered by score"""
+        """Get all similarity results with valid match_details for a submission, ordered by score"""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -297,6 +310,10 @@ class SimilarityResult:
             FROM similarity_results sr
             JOIN papers p ON sr.paper_id = p.id
             WHERE sr.submission_id = ?
+              AND sr.match_details IS NOT NULL
+              AND sr.match_details != ''
+              AND json_extract(sr.match_details, '$.matches') IS NOT NULL
+              AND json_array_length(json_extract(sr.match_details, '$.matches')) > 0
             ORDER BY sr.similarity_score DESC
         ''', (submission_id,))
         results = [dict(row) for row in cursor.fetchall()]

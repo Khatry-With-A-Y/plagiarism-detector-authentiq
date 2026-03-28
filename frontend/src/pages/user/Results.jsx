@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import useAuth from '../../hooks/useAuth';
 import useFetchResults from '../../hooks/useFetchResults';
+import HighlightedText from '../../components/HighlightedText';
+import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
 import '../dashboard.css';
 
 function Results({ id: propId, isEmbedded }) {
@@ -10,28 +12,52 @@ function Results({ id: propId, isEmbedded }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { results, submission, loading, error, refresh } = useFetchResults(id);
-
-  const getRiskLevel = (similarity) => {
-    if (similarity < 15) return 'low';
-    if (similarity < 40) return 'medium';
-    return 'high';
-  };
-
-  const getRiskLabel = (similarity) => {
-    if (similarity < 15) return 'Low Risk';
-    if (similarity < 40) return 'Medium Risk';
-    return 'High Risk';
-  };
+  const [expandedSource, setExpandedSource] = useState(null);
 
   const getUserInitials = () => {
     if (!user?.username) return 'U';
     return user.username.charAt(0).toUpperCase();
   };
 
-  // Calculate overall similarity (max)
+  // Helper function to extract highest sentence match from match_details
+  const getHighestSentenceMatch = (result) => {
+    if (!result.match_details?.matches?.length) return 0;
+    return Math.max(...result.match_details.matches.map(match => match.similarity * 100));
+  };
+
+  // Calculate overall similarity using max logic (similarity + sentence matches)
+  const overallHighestMatch = results.length > 0
+    ? Math.max(...results.map(r => getHighestSentenceMatch(r)))
+    : 0;
+
   const maxSimilarity = results.length > 0
     ? Math.max(...results.map(r => r.similarity_score * 100))
     : 0;
+
+  const overallRisk = calculateRiskLevel(maxSimilarity, overallHighestMatch, true);
+
+  const getSummaryStyle = (risk) => {
+    switch(risk) {
+      case 'critical':
+      case 'high':
+        return { bg: '#fee2e2', color: '#dc2626', icon: 'alert' };
+      case 'medium':
+        return { bg: '#fef3c7', color: '#d97706', icon: 'warning' };
+      default:
+        return { bg: '#dcfce7', color: '#16a34a', icon: 'success' };
+    }
+  };
+  const summaryStyle = getSummaryStyle(overallRisk);
+
+  const toggleSourceExpansion = (paperId) => {
+    setExpandedSource(expandedSource === paperId ? null : paperId);
+  };
+
+  const getMatchClassification = (similarity) => {
+    if (similarity >= 0.8) return { label: 'High Match', color: '#dc2626' };
+    if (similarity >= 0.5) return { label: 'Medium Match', color: '#f59e0b' };
+    return { label: 'Possible Paraphrase', color: '#3b82f6' };
+  };
 
   if (loading) {
     return (
@@ -133,14 +159,72 @@ function Results({ id: propId, isEmbedded }) {
                     </div>
                   </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '32px', fontWeight: '700', color: '#1a1a2e' }}>
-                    {maxSimilarity.toFixed(1)}%
+                <div style={{ display: 'flex', gap: '32px', textAlign: 'right' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px' }}>Overall Similarity</div>
+                    <div style={{ fontSize: '28px', fontWeight: '700', color: '#1a1a2e' }}>
+                      {maxSimilarity.toFixed(1)}%
+                    </div>
                   </div>
-                  <span className={`dashboard-risk-badge ${getRiskLevel(maxSimilarity)}`}>
-                    {getRiskLabel(maxSimilarity)}
-                  </span>
+                  <div>
+                    <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px' }}>Highest Sentence Match</div>
+                    <div style={{ fontSize: '28px', fontWeight: '700', color: '#1a1a2e' }}>
+                      {overallHighestMatch.toFixed(1)}%
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span className={`dashboard-risk-badge ${calculateRiskLevel(maxSimilarity, overallHighestMatch, true)}`} style={{ padding: '8px 16px', fontSize: '14px' }}>
+                      {getRiskLabel(calculateRiskLevel(maxSimilarity, overallHighestMatch, true))}
+                    </span>
+                  </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Analysis Summary */}
+            <div className="dashboard-tip-card" style={{ marginBottom: '24px', marginLeft: '24px', marginRight: '24px', borderLeft: `4px solid ${summaryStyle.color}` }}>
+              <div className="dashboard-tip-header">
+                <div className="dashboard-tip-icon" style={{ backgroundColor: summaryStyle.bg, color: summaryStyle.color, width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}>
+                  {summaryStyle.icon === 'success' ? (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                  ) : summaryStyle.icon === 'warning' ? (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                      <line x1="12" y1="9" x2="12" y2="13"></line>
+                      <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                  ) : (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                  )}
+                </div>
+                <h3 style={{ margin: 0, color: '#1a1a2e', fontSize: '18px' }}>Analysis Summary</h3>
+              </div>
+              <div className="dashboard-tip-content" style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {results.length === 0 ? (
+                  <div style={{ color: '#1e293b' }}>
+                    No similarity matches were found in our database. Your document appears to be completely original!
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <strong style={{ color: '#1e293b' }}>Findings:</strong> This document has an overall similarity of <strong>{maxSimilarity.toFixed(1)}%</strong> across <strong>{submission.documents_compared || results.length}</strong> sources. The highest exact sentence match detected is <strong>{overallHighestMatch.toFixed(1)}%</strong>.
+                    </div>
+                    <div>
+                      <strong style={{ color: '#1e293b' }}>Recommendation:</strong> {overallRisk === 'low'
+                        ? "Your document shows minimal similarity with sources in our database. This indicates strong originality."
+                        : overallRisk === 'medium'
+                        ? "Your document has some similarity with existing sources. Review the matched sections and ensure proper citations are in place."
+                        : "Some sections of your document closely match existing sources. Please review the highlighted parts and add proper citations or rewrite them in your own words."}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -149,7 +233,7 @@ function Results({ id: propId, isEmbedded }) {
               <div className="dashboard-reports-header">
                 <h2>Similarity Matches</h2>
                 <span style={{ fontSize: '14px', color: '#64748b' }}>
-                  {results.length} document{results.length !== 1 ? 's' : ''} compared
+                  {submission.documents_compared || results.length} document{(submission.documents_compared || results.length) !== 1 ? 's' : ''} compared
                 </span>
               </div>
 
@@ -157,7 +241,7 @@ function Results({ id: propId, isEmbedded }) {
                 <div className="dashboard-empty">
                   <svg className="dashboard-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10"/>
-                    <path d="M16 16s-1.5-2-4-2-4 2-4 2"/>
+                    <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
                     <line x1="9" y1="9" x2="9.01" y2="9"/>
                     <line x1="15" y1="9" x2="15.01" y2="9"/>
                   </svg>
@@ -168,47 +252,154 @@ function Results({ id: propId, isEmbedded }) {
                 <table className="dashboard-table">
                   <thead>
                     <tr>
-                      <th>Rank</th>
-                      <th>Source Document</th>
-                      <th>Author</th>
-                      <th>Similarity %</th>
-                      <th>Risk Level</th>
+                      <th style={{ width: '8%' }}>Rank</th>
+                      <th style={{ width: '37%' }}>Source Document</th>
+                      <th style={{ width: '15%' }}>Author</th>
+                      <th style={{ width: '15%' }}>Similarity %</th>
+                      <th style={{ width: '15%' }}>Risk Level</th>
+                      <th style={{ width: '10%' }}>Details</th>
                     </tr>
                   </thead>
                   <tbody>
                     {results.map((result, index) => {
                       const similarity = result.similarity_score * 100;
-                      const riskLevel = getRiskLevel(similarity);
+                      const highestMatch = getHighestSentenceMatch(result);
+                      const riskLevel = calculateRiskLevel(similarity, highestMatch, true);
+                      const isExpanded = expandedSource === result.paper_id;
+                      const hasMatchDetails = result.match_details && result.match_details.matches && result.match_details.matches.length > 0;
+
                       return (
-                        <tr key={result.paper_id}>
-                          <td style={{ fontWeight: '600', color: '#1e40af' }}>#{index + 1}</td>
-                          <td>
-                            <div className="dashboard-doc-name">
-                              <div className="dashboard-doc-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                                  <polyline points="14 2 14 8 20 8"/>
-                                </svg>
+                        <React.Fragment key={result.paper_id}>
+                          <tr
+                            style={{ cursor: hasMatchDetails ? 'pointer' : 'default' }}
+                            onClick={() => hasMatchDetails && toggleSourceExpansion(result.paper_id)}
+                          >
+                            <td style={{ fontWeight: '600', color: '#1e40af' }}>#{index + 1}</td>
+                            <td>
+                              <div className="dashboard-doc-cell">
+                                <div className="dashboard-doc-icon-small">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                  </svg>
+                                </div>
+                                <div className="dashboard-doc-info">
+                                  <span className="dashboard-doc-name">{result.title}</span>
+                                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{result.filename}</span>
+                                </div>
                               </div>
-                              <div>
-                                <span style={{ fontWeight: '500' }}>{result.title}</span>
-                                <br />
-                                <span style={{ fontSize: '12px', color: '#94a3b8' }}>{result.filename}</span>
-                              </div>
-                            </div>
-                          </td>
-                          <td>{result.author}</td>
-                          <td>
-                            <span className={`dashboard-similarity ${riskLevel}`}>
-                              {similarity.toFixed(2)}%
-                            </span>
-                          </td>
-                          <td>
-                            <span className={`dashboard-risk-badge ${riskLevel}`}>
-                              {getRiskLabel(similarity)}
-                            </span>
-                          </td>
-                        </tr>
+                            </td>
+                            <td>{result.author}</td>
+                            <td>
+                              <span className={`dashboard-similarity ${riskLevel}`}>
+                                {similarity.toFixed(1)}%
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`dashboard-risk-badge ${riskLevel}`}>
+                                {getRiskLabel(riskLevel)}
+                              </span>
+                            </td>
+                            <td>
+                              {hasMatchDetails ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); toggleSourceExpansion(result.paper_id); }}
+                                  style={{
+                                    background: isExpanded ? '#1e40af' : '#f1f5f9',
+                                    color: isExpanded ? '#fff' : '#64748b',
+                                    border: 'none',
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    fontSize: '12px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                >
+                                  <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                                  >
+                                    <polyline points="6 9 12 15 18 9"/>
+                                  </svg>
+                                  {isExpanded ? 'Hide' : 'View'}
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: '12px', color: '#94a3b8' }}>--</span>
+                              )}
+                            </td>
+                          </tr>
+
+                          {/* Expandable Detail Panel */}
+                          {isExpanded && hasMatchDetails && (
+                            <tr>
+                              <td colSpan="6" style={{ padding: 0, background: '#f8fafc' }}>
+                                <div style={{ padding: '20px', borderTop: '1px solid #e2e8f0' }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                                    {/* Left: Highlighted document text */}
+                                    <div>
+                                      <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#1a1a2e', marginBottom: '12px' }}>
+                                        Your Document (Highlighted Matches)
+                                      </h4>
+                                      <HighlightedText
+                                        text={submission?.submission_text || ''}
+                                        highlights={result.match_details.submission_highlight_ranges || []}
+                                      />
+                                    </div>
+
+                                    {/* Right: Matched sentences list */}
+                                    <div>
+                                      <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#1a1a2e', marginBottom: '12px' }}>
+                                        Matched Sentences ({result.match_details.matches.length})
+                                      </h4>
+                                      <div style={{ maxHeight: '400px', overflowY: 'auto', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                        {result.match_details.matches.map((match, idx) => {
+                                          const classification = getMatchClassification(match.similarity);
+                                          return (
+                                            <div
+                                              key={idx}
+                                              style={{
+                                                padding: '12px 16px',
+                                                borderBottom: idx < result.match_details.matches.length - 1 ? '1px solid #f1f5f9' : 'none'
+                                              }}
+                                            >
+                                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '600', color: classification.color, textTransform: 'uppercase' }}>
+                                                  {classification.label}
+                                                </span>
+                                                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>
+                                                  {Math.round(match.similarity * 100)}% similar
+                                                </span>
+                                              </div>
+                                              <div style={{ marginBottom: '8px' }}>
+                                                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Your text:</span>
+                                                <p style={{ fontSize: '13px', color: '#334155', margin: 0, lineHeight: '1.5', background: '#fef2f2', padding: '8px', borderRadius: '4px', borderLeft: '3px solid #ef4444' }}>
+                                                  "{match.submission_sentence?.text || ''}"
+                                                </p>
+                                              </div>
+                                              <div>
+                                                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Source ({result.title}):</span>
+                                                <p style={{ fontSize: '13px', color: '#334155', margin: 0, lineHeight: '1.5', background: '#f0f9ff', padding: '8px', borderRadius: '4px', borderLeft: '3px solid #3b82f6' }}>
+                                                  "{match.corpus_sentence?.text || ''}"
+                                                </p>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -216,71 +407,9 @@ function Results({ id: propId, isEmbedded }) {
               )}
             </div>
 
-            {/* Summary Section */}
-            <div className="dashboard-bottom">
-              <div className="dashboard-tip-card">
-                <div className="dashboard-tip-header">
-                  <div className="dashboard-tip-icon" style={{ backgroundColor: '#dbeafe', color: '#1e40af' }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"/>
-                      <line x1="12" y1="16" x2="12" y2="12"/>
-                      <line x1="12" y1="8" x2="12.01" y2="8"/>
-                    </svg>
-                  </div>
-                  <h3>Analysis Summary</h3>
-                </div>
-                <p className="dashboard-tip-content">
-                  {maxSimilarity < 15
-                    ? "Great job! Your document shows minimal similarity with sources in our database. This indicates strong originality."
-                    : maxSimilarity < 40
-                    ? "Your document has some similarity with existing sources. Review the matched sections and ensure proper citations are in place."
-                    : "High similarity detected! Please carefully review the matched content and consider revising sections that may require proper attribution."}
-                </p>
-              </div>
-              <div className="dashboard-chart-card">
-                <h3>Top 5 Matches</h3>
-                {results.length === 0 ? (
-                  <div className="dashboard-empty">
-                    <p>No matches to display</p>
-                  </div>
-                ) : (
-                  <div className="dashboard-chart">
-                    {results.slice(0, 5).map((result) => {
-                      const similarity = result.similarity_score * 100;
-                      const riskLevel = getRiskLevel(similarity);
-                      return (
-                        <div key={result.paper_id} className="dashboard-chart-bar">
-                          <span className="dashboard-chart-label" title={result.title}>
-                            {result.title.length > 12
-                              ? result.title.substring(0, 12) + '...'
-                              : result.title}
-                          </span>
-                          <div className="dashboard-chart-track">
-                            <div
-                              className={`dashboard-chart-fill ${riskLevel}`}
-                              style={{ width: `${Math.min(similarity, 100)}%` }}
-                            ></div>
-                          </div>
-                          <span className="dashboard-chart-value">{similarity.toFixed(1)}%</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
           </>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="dashboard-footer">
-        <p className="dashboard-footer-copyright">© 2024 Authentiq. All rights reserved.</p>
-        <div className="dashboard-footer-links">
-          <a href="#" className="dashboard-footer-link">Help Center</a>
-          <a href="#" className="dashboard-footer-link">Privacy Policy</a>
-        </div>
-      </footer>
     </div>
   );
 }

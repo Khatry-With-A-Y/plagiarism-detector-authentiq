@@ -87,7 +87,7 @@ function Login() {
                 required
               />
             </div>
-            <a href="#" className="forgot-link">Forgot password?</a>
+            {/* <a href="#" className="forgot-link">Forgot password?</a> */}
           </div>
 
           <div className="checkbox-container">

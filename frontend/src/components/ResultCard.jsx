@@ -1,17 +1,38 @@
 import React, { useState } from 'react';
+import { calculateRiskLevel, getRiskTextColor } from '../utils/riskAssessment';
 
 function ResultCard({ result, rank }) {
   const [expanded, setExpanded] = useState(false);
-  const similarityPercent = (result.similarity_score * 100).toFixed(2);
+  const similarityPercent = (result.similarity_score * 100).toFixed(1);
+  const matchDetails = result.match_details || {};
+  const highestMatchScore = matchDetails.highest_match_score || 0;
+  const highestMatchPercent = (highestMatchScore * 100).toFixed(1);
 
-  const getScoreColor = (score) => {
-    if (score >= 0.7) return '#dc3545'; // High similarity - red
-    if (score >= 0.4) return '#ffc107'; // Medium similarity - yellow
-    return '#28a745'; // Low similarity - green
-  };
+  // Use standardized risk assessment
+  const similarityRisk = calculateRiskLevel(result.similarity_score);
+  const highestMatchRisk = calculateRiskLevel(highestMatchScore);
+
+  const getSimilarityColor = () => getRiskTextColor(similarityRisk);
+  const getHighestMatchColor = () => getRiskTextColor(highestMatchRisk);
+
+  // Use standardized high risk threshold (40%)
+  const isHighRisk = (highestMatchScore * 100) >= 40;
 
   return (
-    <div className="card" style={{ borderLeft: `4px solid ${getScoreColor(result.similarity_score)}` }}>
+    <div className="card" style={{ borderLeft: `4px solid ${getSimilarityColor()}`, position: 'relative' }}>
+      {isHighRisk && (
+        <div style={{
+          backgroundColor: '#ffdddd',
+          color: '#d8000c',
+          padding: '8px 12px',
+          borderRadius: '4px',
+          marginBottom: '10px',
+          fontWeight: 'bold',
+          border: '1px solid #d8000c'
+        }}>
+          ⚠️ Warning: High confidence exact text matches found ({highestMatchPercent}%)
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ flex: 1 }}>
           <h4 style={{ marginBottom: '10px' }}>
@@ -21,10 +42,18 @@ function ResultCard({ result, rank }) {
             <strong>Author:</strong> {result.author || 'Unknown'}
           </p>
           <p style={{ color: '#666', marginBottom: '10px' }}>
-            <strong>Similarity:</strong>{' '}
-            <span style={{ color: getScoreColor(result.similarity_score), fontWeight: 'bold' }}>
+            <strong>Overall Similarity:</strong>{' '}
+            <span style={{ color: getSimilarityColor(), fontWeight: 'bold' }}>
               {similarityPercent}%
             </span>
+            {highestMatchScore > 0 && (
+              <span style={{ marginLeft: '15px' }}>
+                <strong>Highest Exact Match:</strong>{' '}
+                <span style={{ color: getHighestMatchColor(), fontWeight: 'bold' }}>
+                  {highestMatchPercent}%
+                </span>
+              </span>
+            )}
           </p>
         </div>
         <button
@@ -51,7 +80,7 @@ function ResultCard({ result, rank }) {
                 style={{
                   width: `${similarityPercent}%`,
                   height: '100%',
-                  backgroundColor: getScoreColor(result.similarity_score),
+                  backgroundColor: getSimilarityColor(),
                   transition: 'width 0.3s'
                 }}
               />
