@@ -166,24 +166,24 @@ def process_submission_cached(submission_text: str, corpus_preprocessed: List[Tu
 
 def process_submission_with_cached_idf(
     submission_text: str,
-    corpus_preprocessed: List[Tuple[int, List[str]]],
+    corpus_vectors: List[Tuple[int, Dict[str, float], set, float]],
     cached_idf: Dict[str, float]
 ) -> List[Dict]:
     """
-    Process submission using pre-computed IDF from corpus cache (FASTEST).
+    Process submission using pre-computed IDF and vectors from corpus cache (FASTEST).
 
-    This avoids recomputing IDF for every submission - the most expensive operation
-    when processing multiple submissions concurrently.
+    This avoids recomputing IDF, TF, and document norms for every submission - 
+    eliminating O(N) expensive operations when processing multiple submissions.
 
     Args:
         submission_text: The submitted document text
-        corpus_preprocessed: List of (paper_id, ngrams_list) tuples
+        corpus_vectors: List of (paper_id, corp_tf, corp_words_set, norm_corp) tuples
         cached_idf: Pre-computed IDF dictionary from corpus cache
 
     Returns:
         List of {paper_id, similarity_score} sorted descending
     """
-    if not corpus_preprocessed:
+    if not corpus_vectors:
         return []
 
     # 1. Preprocess submission
@@ -196,7 +196,7 @@ def process_submission_with_cached_idf(
 
     # 2. Use cached IDF (with fallback for terms only in submission)
     # Terms unique to submission get IDF = log(N / 1) = log(N)
-    N = len(corpus_preprocessed)
+    N = len(corpus_vectors)
     default_idf = math.log(N) if N > 0 else 0
 
     # 3. Compute submission vector norm once (reused for all comparisons)
@@ -212,28 +212,18 @@ def process_submission_with_cached_idf(
     # 4. Compare against corpus
     results = []
 
-    for paper_id, corp_words in corpus_preprocessed:
-        corp_words_set = set(corp_words)
+    for paper_id, corp_tf, corp_words_set, norm_corp in corpus_vectors:
         shared_terms = sub_words_set & corp_words_set
 
         if not shared_terms:
             continue
 
-        corp_tf = TFIDFCalculator.compute_tf(corp_words)
-
         # Dot product (only shared terms contribute)
         dot = sum(
-            (sub_tf.get(t, 0.0) * cached_idf.get(t, default_idf)) *
-            (corp_tf.get(t, 0.0) * cached_idf.get(t, default_idf))
+            (sub_tf.get(t, 0.0) * cached_idf[t]) *
+            (corp_tf.get(t, 0.0) * cached_idf[t])
             for t in shared_terms
         )
-
-        # Corpus document norm
-        norm_corp_sq = sum(
-            (corp_tf.get(t, 0.0) * cached_idf.get(t, default_idf))**2
-            for t in corp_words_set
-        )
-        norm_corp = math.sqrt(norm_corp_sq) if norm_corp_sq > 0 else 0
 
         if norm_corp > 0:
             similarity = dot / (norm_sub * norm_corp)

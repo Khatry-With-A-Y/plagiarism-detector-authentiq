@@ -67,21 +67,28 @@ class User:
 class Paper:
     @staticmethod
     def create(title, author, filename, file_path, content_text, uploaded_by):
-        """Add a paper to the corpus with preprocessed n-grams for fast similarity"""
+        """Add a paper to the corpus with preprocessed n-grams and reference exclusion"""
         from ..utils.text_processing import TextProcessor
+        from ..utils.reference_detector import ReferenceDetector
 
-        # Compute n-grams at ingestion time for caching
+        # Split references from main content (OPTIMIZATION: at ingestion time)
+        main_content, reference_section = ReferenceDetector.split_content_and_references(content_text)
+        has_references = bool(reference_section)
+
+        # Compute n-grams on main_content only (excludes references)
         preprocessed_ngrams = None
-        if content_text:
-            ngrams = TextProcessor.preprocess_for_tfidf(content_text)
+        if main_content:
+            ngrams = TextProcessor.preprocess_for_tfidf(main_content)
             preprocessed_ngrams = json.dumps(ngrams)
 
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO papers (title, author, filename, file_path, content_text, preprocessed_ngrams, uploaded_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (title, author, filename, file_path, content_text, preprocessed_ngrams, uploaded_by))
+            INSERT INTO papers (title, author, filename, file_path, content_text, 
+                              main_content, reference_section, has_references, preprocessed_ngrams, uploaded_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (title, author, filename, file_path, content_text, 
+              main_content, reference_section, has_references, preprocessed_ngrams, uploaded_by))
         conn.commit()
         paper_id = cursor.lastrowid
         conn.close()
@@ -181,14 +188,15 @@ class Paper:
 
 class Submission:
     @staticmethod
-    def create(user_id, filename, file_path, content_text):
-        """Create a new submission"""
+    def create(user_id, filename, file_path, content_text, main_content=None, reference_section=None, has_references=False):
+        """Create a new submission with reference exclusion support"""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO submissions (user_id, filename, file_path, content_text, status)
-            VALUES (?, ?, ?, ?, 'pending')
-        ''', (user_id, filename, file_path, content_text))
+            INSERT INTO submissions (user_id, filename, file_path, content_text, 
+                                   main_content, reference_section, has_references, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+        ''', (user_id, filename, file_path, content_text, main_content, reference_section, has_references))
         conn.commit()
         submission_id = cursor.lastrowid
         conn.close()

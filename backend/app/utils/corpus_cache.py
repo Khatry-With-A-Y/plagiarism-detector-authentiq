@@ -44,6 +44,8 @@ class CorpusCache:
         # IDF cache
         self._idf_cache: Optional[Dict[str, float]] = None
         self._idf_version: int = -1  # Track which corpus version IDF was computed for
+        # Precomputed vectors (paper_id, corp_tf, corp_words_set, norm_corp)
+        self._corpus_vectors: Optional[List[Tuple[int, Dict[str, float], set, float]]] = None
         self._initialized = True
 
     def get_corpus(self) -> List[Tuple[int, List[str]]]:
@@ -104,10 +106,18 @@ class CorpusCache:
             self._compute_idf(corpus)
             return self._idf_cache
 
+    def get_vectors(self) -> Tuple[Dict[str, float], List[Tuple[int, Dict[str, float], set, float]]]:
+        """
+        Get cached IDF and precomputed corpus vectors (TF, words_set, norm).
+        """
+        self.get_idf()  # Ensure IDF and vectors are computed
+        return self._idf_cache, self._corpus_vectors
+
     def _compute_idf(self, corpus: List[Tuple[int, List[str]]]):
-        """Internal: compute IDF from corpus. Must hold _data_lock."""
+        """Internal: compute IDF and vectors from corpus. Must hold _data_lock."""
         if not corpus:
             self._idf_cache = {}
+            self._corpus_vectors = []
             self._idf_version = self._corpus_version
             return
 
@@ -121,6 +131,21 @@ class CorpusCache:
             term: math.log(N / (1 + count))
             for term, count in df.items()
         }
+
+        # Precompute TF, word sets, and document norms to eliminate O(N) work during analysis
+        from .tfidf import TFIDFCalculator
+        vectors = []
+        for paper_id, ngrams in corpus:
+            corp_words_set = set(ngrams)
+            corp_tf = TFIDFCalculator.compute_tf(ngrams)
+            norm_corp_sq = sum(
+                (corp_tf.get(t, 0.0) * self._idf_cache[t])**2
+                for t in corp_words_set
+            )
+            norm_corp = math.sqrt(norm_corp_sq) if norm_corp_sq > 0 else 0
+            vectors.append((paper_id, corp_tf, corp_words_set, norm_corp))
+            
+        self._corpus_vectors = vectors
         self._idf_version = self._corpus_version
 
     def invalidate(self):

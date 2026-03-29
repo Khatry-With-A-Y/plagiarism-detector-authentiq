@@ -63,6 +63,17 @@ def init_database():
         cursor.execute("ALTER TABLE papers ADD COLUMN preprocessed_ngrams TEXT")
         print("Added preprocessed_ngrams column to papers table")
     
+    # Migration: Add reference exclusion columns to papers
+    if 'main_content' not in paper_columns:
+        cursor.execute("ALTER TABLE papers ADD COLUMN main_content TEXT")
+        print("Added main_content column to papers table")
+    if 'reference_section' not in paper_columns:
+        cursor.execute("ALTER TABLE papers ADD COLUMN reference_section TEXT")
+        print("Added reference_section column to papers table")
+    if 'has_references' not in paper_columns:
+        cursor.execute("ALTER TABLE papers ADD COLUMN has_references INTEGER DEFAULT 0")
+        print("Added has_references column to papers table")
+    
     # Create submissions table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS submissions (
@@ -76,6 +87,19 @@ def init_database():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
+    
+    # Migration: Add reference exclusion columns to submissions
+    cursor.execute("PRAGMA table_info(submissions)")
+    submission_columns = [col['name'] for col in cursor.fetchall()]
+    if 'main_content' not in submission_columns:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN main_content TEXT")
+        print("Added main_content column to submissions table")
+    if 'reference_section' not in submission_columns:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN reference_section TEXT")
+        print("Added reference_section column to submissions table")
+    if 'has_references' not in submission_columns:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN has_references INTEGER DEFAULT 0")
+        print("Added has_references column to submissions table")
     
     # Create similarity_results table
     cursor.execute('''

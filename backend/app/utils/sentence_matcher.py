@@ -116,43 +116,68 @@ def compute_sentence_matches(
     if not sub_sentences or not corp_sentences:
         return result
 
-    # Pre-compute n-grams for all sentences
-    sub_ngrams = []
+    # Pre-compute vectors (tf, words_set, norm) for all sentences
+    default_idf = 1.0
+    sub_vectors = []
     for sent in sub_sentences:
         ngrams = TextProcessor.preprocess_for_tfidf(sent['text'])
-        sub_ngrams.append(ngrams)
+        if not ngrams:
+            sub_vectors.append(None)
+            continue
+        words_set = set(ngrams)
+        tf = TFIDFCalculator.compute_tf(ngrams)
+        norm_sq = sum((tf.get(t, 0.0) * cached_idf.get(t, default_idf)) ** 2 for t in words_set)
+        norm = math.sqrt(norm_sq) if norm_sq > 0 else 0
+        sub_vectors.append((tf, words_set, norm))
 
-    corp_ngrams = []
+    corp_vectors = []
     for sent in corp_sentences:
         ngrams = TextProcessor.preprocess_for_tfidf(sent['text'])
-        corp_ngrams.append(ngrams)
-
-    # Default IDF for terms not in cache
-    default_idf = 1.0
+        if not ngrams:
+            corp_vectors.append(None)
+            continue
+        words_set = set(ngrams)
+        tf = TFIDFCalculator.compute_tf(ngrams)
+        norm_sq = sum((tf.get(t, 0.0) * cached_idf.get(t, default_idf)) ** 2 for t in words_set)
+        norm = math.sqrt(norm_sq) if norm_sq > 0 else 0
+        corp_vectors.append((tf, words_set, norm))
 
     # Find best match for each submission sentence
     all_matches = []
     matched_sub_indices = set()
 
     for sub_idx, sub_sent in enumerate(sub_sentences):
-        sub_sent_ngrams = sub_ngrams[sub_idx]
-        if not sub_sent_ngrams:
+        sub_vec = sub_vectors[sub_idx]
+        if not sub_vec:
+            continue
+            
+        tf1, set1, norm1 = sub_vec
+        if norm1 == 0:
             continue
 
         best_match = None
         best_similarity = 0.0
 
         for corp_idx, corp_sent in enumerate(corp_sentences):
-            corp_sent_ngrams = corp_ngrams[corp_idx]
-            if not corp_sent_ngrams:
+            corp_vec = corp_vectors[corp_idx]
+            if not corp_vec:
+                continue
+                
+            tf2, set2, norm2 = corp_vec
+            if norm2 == 0:
                 continue
 
-            similarity = compute_sentence_similarity(
-                sub_sent_ngrams,
-                corp_sent_ngrams,
-                cached_idf,
-                default_idf
+            shared_terms = set1 & set2
+            if not shared_terms:
+                continue
+
+            dot = sum(
+                (tf1.get(t, 0.0) * cached_idf.get(t, default_idf)) *
+                (tf2.get(t, 0.0) * cached_idf.get(t, default_idf))
+                for t in shared_terms
             )
+            
+            similarity = dot / (norm1 * norm2)
 
             if similarity >= threshold and similarity > best_similarity:
                 best_similarity = similarity

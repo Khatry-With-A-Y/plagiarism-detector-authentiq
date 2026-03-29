@@ -71,12 +71,20 @@ def upload_submission():
         # Extract text from file (use fast_mode=True to match corpus ingestion method)
         content_text = extract_text(str(file_path), file_ext, fast_mode=True)
         
-        # Create submission record
+        # OPTIMIZATION: Split references at upload time (zero user-facing latency)
+        from ..utils.reference_detector import ReferenceDetector
+        main_content, reference_section = ReferenceDetector.split_content_and_references(content_text)
+        has_references = bool(reference_section)
+        
+        # Create submission record with split text
         submission_id = Submission.create(
             user_id=user['id'],
             filename=final_filename,
             file_path=str(file_path),
-            content_text=content_text
+            content_text=content_text,
+            main_content=main_content,  # Used for plagiarism detection
+            reference_section=reference_section,  # Stored but not used for similarity
+            has_references=has_references
         )
         
         # Start background processing using thread pool
@@ -133,7 +141,9 @@ def get_submissions():
             'uploaded_at': s['uploaded_at'],
             'file_size': s.get('file_size', 0),
             'similarity_score': round(max_similarity * 100, 2),  # Convert to percentage
-            'highest_exact_match': round(highest_exact_match * 100, 2)
+            'highest_exact_match': round(highest_exact_match * 100, 2),
+            'has_references': bool(s.get('has_references', 0)),  # Show if references detected
+            'reference_excluded': bool(s.get('main_content'))  # Show if references excluded from analysis
         })
 
     return jsonify({'submissions': result}), 200
@@ -232,6 +242,8 @@ def get_submission_results(submission_id):
         'filename': submission['filename'],
         'status': submission['status'],
         'submission_text': submission.get('content_text', ''),  # Include for highlighting
+        'has_references': bool(submission.get('has_references', 0)),  # Reference exclusion info
+        'reference_excluded': bool(submission.get('main_content')),  # Whether references were excluded
         'results': formatted_results,
         'documents_compared': len(formatted_results)
     }), 200
@@ -275,17 +287,20 @@ def process_submission_analysis(submission_id):
     try:
         # Get cached corpus and IDF (shared across all worker threads)
         corpus_cache = get_corpus_cache()
-        corpus_preprocessed = corpus_cache.get_corpus()
-        cached_idf = corpus_cache.get_idf()
+        cached_idf, corpus_vectors = corpus_cache.get_vectors()
 
-        if not corpus_preprocessed:
+        if not corpus_vectors:
             Submission.update_status(submission_id, 'completed')
             return
 
-        # Process similarity using cached corpus AND cached IDF - no redundant computation!
+        # OPTIMIZATION: Use main_content (references excluded) for similarity
+        # Falls back to content_text if main_content not available (backward compatibility)
+        text_for_comparison = submission.get('main_content') or submission['content_text']
+
+        # Process similarity using cached vectors and IDF - no redundant computation!
         results = process_submission_with_cached_idf(
-            submission['content_text'],
-            corpus_preprocessed,
+            text_for_comparison,  # Main content only, references excluded
+            corpus_vectors,
             cached_idf
         )
 
@@ -295,20 +310,25 @@ def process_submission_analysis(submission_id):
 
         # Compute and store sentence-level matches for top 10 sources
         top_results = results[:10]
-        if top_results and submission['content_text']:
-            # Build a map of paper_id -> content_text for top sources
+        if top_results and text_for_comparison:
+            # Build a map of paper_id -> main_content for top sources
             paper_ids = [r['paper_id'] for r in top_results]
             papers = {p['id']: p for p in [Paper.get_by_id(pid) for pid in paper_ids] if p}
 
             for result in top_results:
                 paper = papers.get(result['paper_id'])
-                if not paper or not paper.get('content_text'):
+                if not paper:
+                    continue
+                
+                # OPTIMIZATION: Use main_content for both submission and corpus paper
+                paper_text = paper.get('main_content') or paper.get('content_text')
+                if not paper_text:
                     continue
 
                 try:
                     match_details = compute_sentence_matches(
-                        submission['content_text'],
-                        paper['content_text'],
+                        text_for_comparison,  # Submission main content
+                        paper_text,           # Corpus paper main content
                         cached_idf,
                         threshold=0.3,
                         top_n=20
