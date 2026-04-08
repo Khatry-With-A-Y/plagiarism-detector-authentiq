@@ -13,8 +13,8 @@ class SimilarityEngine:
     
     def cosine_similarity(self, vec1, vec2):
         """Cosine similarity between two sparse dict vectors"""
-        common_terms = set(vec1.keys()) & set(vec2.keys())
-        dot = sum(vec1[term] * vec2[term] for term in common_terms)
+        common_terms = set(vec1.keys()) & set(vec2.keys())           # Instantly finds only the dimensions (words) both documents share
+        dot = sum(vec1[term] * vec2[term] for term in common_terms)  # Calculates the dot product by only multiplying the overlapping values
         norm1 = math.sqrt(sum(v**2 for v in vec1.values()))
         norm2 = math.sqrt(sum(v**2 for v in vec2.values()))
         if norm1 == 0 or norm2 == 0:

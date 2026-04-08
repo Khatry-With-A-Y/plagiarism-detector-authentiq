@@ -306,11 +306,6 @@ function UserManagement({ isEmbedded = false }) {
           </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="dashboard-footer">
-        <p className="dashboard-footer-copyright">© 2026 Authentiq Plagiarism Detection. All rights reserved.</p>
-      </footer>
     </div>
   );
 }

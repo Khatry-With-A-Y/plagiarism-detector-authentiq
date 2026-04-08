@@ -28,7 +28,7 @@ export const corpusAPI = {
     });
   },
 
-  getAll: () => api.get('/corpus'),
+  getAll: (page = 1, limit = 10) => api.get(`/corpus?page=${page}&limit=${limit}`),
 
   delete: (paperId) => api.delete(`/corpus/${paperId}`),
 };

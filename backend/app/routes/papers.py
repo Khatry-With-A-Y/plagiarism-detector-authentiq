@@ -422,8 +422,18 @@ def upload_corpus_paper():
 @papers_bp.route('/corpus', methods=['GET'])
 @require_auth
 def get_corpus():
-    """Get all papers in corpus"""
-    papers = Paper.get_all()
+    """Get all papers in corpus with pagination support"""
+    # Get pagination parameters from query string
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 10, type=int)
+    
+    # Validate parameters
+    if page < 1:
+        page = 1
+    if limit < 1 or limit > 100:
+        limit = 10
+    
+    papers, total = Paper.get_paginated(page, limit)
     
     return jsonify({
         'papers': [
@@ -435,7 +445,13 @@ def get_corpus():
                 'uploaded_at': p['uploaded_at']
             }
             for p in papers
-        ]
+        ],
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+            'pages': (total + limit - 1) // limit  # Ceiling division
+        }
     }), 200
 
 

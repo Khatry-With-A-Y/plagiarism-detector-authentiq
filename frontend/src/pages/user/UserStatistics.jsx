@@ -567,16 +567,6 @@ function UserStatistics({ isEmbedded = false }) {
           )}
         </section>
       </main>
-
-      {/* Footer */}
-      <footer className="ustats-footer">
-        <p className="ustats-footer-copyright">© 2026 Authentiq. All rights reserved.</p>
-        <div className="ustats-footer-links">
-          <a href="#" className="ustats-footer-link">Privacy Policy</a>
-          <a href="#" className="ustats-footer-link">Terms of Service</a>
-          <a href="#" className="ustats-footer-link">Contact Support</a>
-        </div>
-      </footer>
     </div>
   );
 }

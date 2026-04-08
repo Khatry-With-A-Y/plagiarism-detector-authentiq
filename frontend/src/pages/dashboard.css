@@ -492,6 +492,7 @@
   font-size: 13px;
   color: #374151;
   outline: none;
+  cursor: text;
 }
 
 .dashboard-search input::placeholder {
@@ -563,6 +564,10 @@
   font-size: 14px;
   color: #374151;
   border-bottom: 1px solid #f9fafb;
+  max-height: 60px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .dashboard-table tr:last-child td {
@@ -1062,13 +1067,15 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 15px;
-  transition: all 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
   outline: none;
+  cursor: text;
 }
 
 .dashboard-modal-input:focus {
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  cursor: text;
 }
 
 .dashboard-modal-footer {

@@ -51,6 +51,7 @@
   font-size: 14px;
   color: #374151;
   outline: none;
+  cursor: text;
 }
 
 .usermgmt-search input::placeholder {

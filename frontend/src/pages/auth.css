@@ -120,6 +120,7 @@
   font-size: 14px;
   font-weight: 600;
   color: #1a1a2e;
+  cursor: default;
 }
 
 .forgot-link {
@@ -137,6 +138,11 @@
   position: relative;
   display: flex;
   align-items: center;
+  cursor: text !important;
+}
+
+.input-wrapper:hover {
+  cursor: text !important;
 }
 
 .input-icon {
@@ -158,7 +164,11 @@
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
   background-color: #fff;
-  cursor: text;
+  cursor: text !important;
+}
+
+.auth-input-field:hover {
+  cursor: text !important;
 }
 
 .auth-input-field::placeholder {
@@ -168,10 +178,12 @@
 .auth-input-field:focus {
   border-color: #1e40af;
   box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+  cursor: text !important;
 }
 
 .auth-input-field.has-icon {
   padding-left: 44px;
+  cursor: text !important;
 }
 
 .checkbox-container {

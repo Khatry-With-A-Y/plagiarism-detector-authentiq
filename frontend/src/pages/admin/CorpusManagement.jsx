@@ -18,6 +18,8 @@ function CorpusManagement({ isEmbedded = false }) {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customValue, setCustomValue] = useState('');
+  const [totalPapers, setTotalPapers] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -26,12 +28,18 @@ function CorpusManagement({ isEmbedded = false }) {
       return;
     }
     fetchPapers();
-  }, [navigate, isAdmin]);
+  }, [navigate, isAdmin, currentPage, itemsPerPage]);
 
   const fetchPapers = async () => {
+    setLoading(true);
     try {
-      const response = await corpusAPI.getAll();
-      setPapers(response.data.papers || []);
+      const response = await corpusAPI.getAll(currentPage, itemsPerPage);
+      const papersData = response.data.papers || [];
+      const pagination = response.data.pagination || {};
+      
+      setPapers(papersData);
+      setTotalPapers(pagination.total || 0);
+      setTotalPages(pagination.pages || 0);
     } catch (err) {
       setError('Failed to load papers');
     } finally {
@@ -78,15 +86,24 @@ function CorpusManagement({ isEmbedded = false }) {
     });
   };
 
-  // Filter and paginate papers
-  const filteredPapers = papers.filter(p =>
-    (p.title || p.filename || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (p.author || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
-  const totalPages = Math.ceil(filteredPapers.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, filteredPapers.length);
-  const paginatedPapers = filteredPapers.slice(startIndex, endIndex);
+  // Filter papers (client-side filtering for current page only)
+  const filteredPapers = papers.filter(p => {
+    if (!searchQuery.trim()) return true;
+    
+    const query = searchQuery.toLowerCase().trim();
+    
+    // If search query is a number, also search by ID
+    if (/^\d+$/.test(query)) {
+      const searchId = parseInt(query, 10);
+      if (p.id === searchId) {
+        return true;
+      }
+    }
+    
+    // Otherwise search by title, filename, and author
+    return (p.title || p.filename || '').toLowerCase().includes(query) ||
+           (p.author || '').toLowerCase().includes(query);
+  });
 
   // Reset to page 1 when search or items per page changes
   useEffect(() => {
@@ -237,7 +254,7 @@ function CorpusManagement({ isEmbedded = false }) {
           <div className="dashboard-reports-header">
             <div>
               <h2>Indexed Papers</h2>
-              <p className="dashboard-reports-subtitle">{filteredPapers.length} papers in corpus</p>
+              <p className="dashboard-reports-subtitle">{totalPapers} papers in corpus</p>
             </div>
             <div className="dashboard-reports-actions">
               <div className="dashboard-search">
@@ -277,7 +294,7 @@ function CorpusManagement({ isEmbedded = false }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedPapers.map((paper) => (
+                  {filteredPapers.map((paper) => (
                     <tr key={paper.id}>
                       <td style={{ color: '#6b7280', fontWeight: 500 }}>#{paper.id}</td>
                       <td>
@@ -295,8 +312,19 @@ function CorpusManagement({ isEmbedded = false }) {
                           </div>
                         </div>
                       </td>
-                      <td style={{ color: '#374151' }}>{paper.author || 'Unknown'}</td>
-                      <td className="dashboard-date-cell">{formatDate(paper.uploaded_at)}</td>
+                      <td style={{ color: '#374151' }} title={paper.author || 'Unknown'}>
+                        <div style={{ 
+                          overflow: 'hidden', 
+                          textOverflow: 'ellipsis', 
+                          whiteSpace: 'nowrap',
+                          maxWidth: '100%'
+                        }}>
+                          {paper.author || 'Unknown'}
+                        </div>
+                      </td>
+                      <td className="dashboard-date-cell" title={formatDate(paper.uploaded_at)}>
+                        {formatDate(paper.uploaded_at)}
+                      </td>
                       <td>
                         <button
                           className="dashboard-delete-btn"
@@ -319,7 +347,7 @@ function CorpusManagement({ isEmbedded = false }) {
               <div className="dashboard-pagination">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <span className="dashboard-pagination-info">
-                    Showing {startIndex + 1} to {endIndex} of {filteredPapers.length} entries
+                    Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalPapers)} of {totalPapers} entries
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '13px', color: '#6b7280' }}>Show</span>
@@ -390,11 +418,6 @@ function CorpusManagement({ isEmbedded = false }) {
           )}
         </section>
       </main>
-
-      {/* Footer */}
-      <footer className="dashboard-footer">
-        <p className="dashboard-footer-copyright">© 2026 Authentiq Plagiarism Detection. All rights reserved.</p>
-      </footer>
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (

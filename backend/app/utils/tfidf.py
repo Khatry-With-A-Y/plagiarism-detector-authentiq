@@ -35,6 +35,6 @@ class TFIDFCalculator:
             tf_val = tf.get(term, 0.0)
             idf_val = idf.get(term, 0.0)
             tfidf_val = tf_val * idf_val
-            if tfidf_val > 0:  # only store non-zero for sparsity
+            if tfidf_val > 0:  # only store non-zero to reduce bloat
                 vector[term] = tfidf_val
         return vector

@@ -105,6 +105,29 @@ class Paper:
         return papers
     
     @staticmethod
+    def get_paginated(page=1, limit=10):
+        """Get paginated papers in corpus"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        offset = (page - 1) * limit
+        
+        # Get paginated papers
+        cursor.execute('''
+            SELECT * FROM papers 
+            ORDER BY id ASC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset))
+        papers = [dict(row) for row in cursor.fetchall()]
+        
+        # Get total count
+        cursor.execute('SELECT COUNT(*) as total FROM papers')
+        total = cursor.fetchone()['total']
+        
+        conn.close()
+        return papers, total
+    
+    @staticmethod
     def get_by_id(paper_id):
         """Get paper by ID"""
         conn = get_db_connection()
