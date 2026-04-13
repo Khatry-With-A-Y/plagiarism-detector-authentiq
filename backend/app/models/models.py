@@ -105,25 +105,52 @@ class Paper:
         return papers
     
     @staticmethod
-    def get_paginated(page=1, limit=10):
+    def get_paginated(page=1, limit=10, search_query=None):
         """Get paginated papers in corpus"""
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        offset = (page - 1) * limit
+        offset = (page - 1) * limit # Pagination Formula
         
-        # Get paginated papers
-        cursor.execute('''
-            SELECT * FROM papers 
-            ORDER BY id ASC
-            LIMIT ? OFFSET ?
-        ''', (limit, offset))
-        papers = [dict(row) for row in cursor.fetchall()]
-        
-        # Get total count
-        cursor.execute('SELECT COUNT(*) as total FROM papers')
-        total = cursor.fetchone()['total']
-        
+        if search_query:
+            query_str = f"%{search_query}%"
+            if search_query.isdigit():
+                base_query = '''
+                    FROM papers 
+                    WHERE id = ? OR title LIKE ? OR author LIKE ? OR filename LIKE ?
+                '''
+                params = (int(search_query), query_str, query_str, query_str)
+            else:
+                base_query = '''
+                    FROM papers 
+                    WHERE title LIKE ? OR author LIKE ? OR filename LIKE ?
+                '''
+                params = (query_str, query_str, query_str)
+                
+            # Get paginated papers
+            cursor.execute(f'''
+                SELECT * {base_query}
+                ORDER BY id ASC
+                LIMIT ? OFFSET ?
+            ''', params + (limit, offset))
+            papers = [dict(row) for row in cursor.fetchall()]
+            
+            # Get total count
+            cursor.execute(f'SELECT COUNT(*) as total {base_query}', params)
+            total = cursor.fetchone()['total']
+        else:
+            # Get paginated papers
+            cursor.execute('''
+                SELECT * FROM papers 
+                ORDER BY id ASC
+                LIMIT ? OFFSET ?
+            ''', (limit, offset))
+            papers = [dict(row) for row in cursor.fetchall()]
+            
+            # Get total count
+            cursor.execute('SELECT COUNT(*) as total FROM papers')
+            total = cursor.fetchone()['total']
+            
         conn.close()
         return papers, total
     

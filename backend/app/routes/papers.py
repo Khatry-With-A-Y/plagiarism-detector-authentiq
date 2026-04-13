@@ -426,6 +426,7 @@ def get_corpus():
     # Get pagination parameters from query string
     page = request.args.get('page', 1, type=int)
     limit = request.args.get('limit', 10, type=int)
+    search_query = request.args.get('search', '', type=str).strip()
     
     # Validate parameters
     if page < 1:
@@ -433,7 +434,7 @@ def get_corpus():
     if limit < 1 or limit > 100:
         limit = 10
     
-    papers, total = Paper.get_paginated(page, limit)
+    papers, total = Paper.get_paginated(page, limit, search_query if search_query else None)
     
     return jsonify({
         'papers': [

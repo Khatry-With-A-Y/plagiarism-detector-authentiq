@@ -491,6 +491,8 @@
   background: none;
   font-size: 13px;
   color: #374151;
+  -webkit-text-fill-color: #374151;
+  caret-color: #111827;
   outline: none;
   cursor: text;
 }

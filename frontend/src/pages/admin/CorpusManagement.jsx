@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { corpusAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
@@ -7,9 +7,11 @@ import '../dashboard.css';
 function CorpusManagement({ isEmbedded = false }) {
   const { user, logout, isAdmin } = useAuth();
   const [papers, setPapers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [paperToDelete, setPaperToDelete] = useState(null);
@@ -20,30 +22,74 @@ function CorpusManagement({ isEmbedded = false }) {
   const [customValue, setCustomValue] = useState('');
   const [totalPapers, setTotalPapers] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+  const previousDebouncedSearchRef = useRef('');
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (!isAdmin) {
       navigate('/dashboard');
       return;
     }
+
+    const searchChanged = previousDebouncedSearchRef.current !== debouncedSearchQuery;
+    if (searchChanged) {
+      previousDebouncedSearchRef.current = debouncedSearchQuery;
+      if (currentPage !== 1) {
+        setCurrentPage(1);
+        return;
+      }
+    }
+
     fetchPapers();
-  }, [navigate, isAdmin, currentPage, itemsPerPage]);
+  }, [navigate, isAdmin, currentPage, itemsPerPage, debouncedSearchQuery]);
 
   const fetchPapers = async () => {
-    setLoading(true);
+    if (initialLoading) {
+      setInitialLoading(true);
+    } else {
+      setIsFetching(true);
+    }
+
     try {
-      const response = await corpusAPI.getAll(currentPage, itemsPerPage);
+      const response = await corpusAPI.getAll(currentPage, itemsPerPage, debouncedSearchQuery);
       const papersData = response.data.papers || [];
       const pagination = response.data.pagination || {};
-      
+      const nextTotalPapers = pagination.total || 0;
+      const nextTotalPages = pagination.pages || 0;
+      const nextPage = pagination.page || currentPage;
+      const nextLimit = pagination.limit || itemsPerPage;
+
+      if (nextTotalPages > 0 && currentPage > nextTotalPages) {
+        setCurrentPage(nextTotalPages);
+        return;
+      }
+      if (nextTotalPages === 0 && currentPage !== 1) {
+        setCurrentPage(1);
+      }
+
       setPapers(papersData);
-      setTotalPapers(pagination.total || 0);
-      setTotalPages(pagination.pages || 0);
+      setTotalPapers(nextTotalPapers);
+      setTotalPages(nextTotalPages);
+
+      if (nextPage !== currentPage) {
+        setCurrentPage(nextPage);
+      }
+      if (nextLimit !== itemsPerPage) {
+        setItemsPerPage(nextLimit);
+      }
     } catch (err) {
       setError('Failed to load papers');
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setIsFetching(false);
     }
   };
 
@@ -86,29 +132,9 @@ function CorpusManagement({ isEmbedded = false }) {
     });
   };
 
-  // Filter papers (client-side filtering for current page only)
-  const filteredPapers = papers.filter(p => {
-    if (!searchQuery.trim()) return true;
-    
-    const query = searchQuery.toLowerCase().trim();
-    
-    // If search query is a number, also search by ID
-    if (/^\d+$/.test(query)) {
-      const searchId = parseInt(query, 10);
-      if (p.id === searchId) {
-        return true;
-      }
-    }
-    
-    // Otherwise search by title, filename, and author
-    return (p.title || p.filename || '').toLowerCase().includes(query) ||
-           (p.author || '').toLowerCase().includes(query);
-  });
-
-  // Reset to page 1 when search or items per page changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, itemsPerPage]);
+  const hasEntries = totalPapers > 0;
+  const startEntry = hasEntries ? ((currentPage - 1) * itemsPerPage) + 1 : 0;
+  const endEntry = hasEntries ? Math.min(currentPage * itemsPerPage, totalPapers) : 0;
 
   const handleItemsPerPageChange = (e) => {
     const value = e.target.value;
@@ -118,6 +144,7 @@ function CorpusManagement({ isEmbedded = false }) {
     } else {
       setShowCustomInput(false);
       setItemsPerPage(parseInt(value, 10));
+      setCurrentPage(1);
     }
   };
 
@@ -132,11 +159,12 @@ function CorpusManagement({ isEmbedded = false }) {
     let num = parseInt(customValue, 10);
     if (isNaN(num) || num < 1) {
       num = 1;
-    } else if (num > 50) {
-      num = 50;
+    } else if (num > 100) {
+      num = 100;
     }
     setCustomValue(num.toString());
     setItemsPerPage(num);
+    setCurrentPage(1);
   };
 
   const handleCustomKeyDown = (e) => {
@@ -145,7 +173,7 @@ function CorpusManagement({ isEmbedded = false }) {
     }
   };
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="dashboard-loading">
         <div className="dashboard-spinner"></div>
@@ -272,14 +300,14 @@ function CorpusManagement({ isEmbedded = false }) {
             </div>
           </div>
 
-          {filteredPapers.length === 0 ? (
+          {papers.length === 0 ? (
             <div className="dashboard-empty">
               <svg className="dashboard-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
               </svg>
-              <h3>{searchQuery ? 'No matching papers' : 'No papers in corpus'}</h3>
-              <p>{searchQuery ? 'Try adjusting your search query' : 'Papers will appear here once added to the corpus'}</p>
+              <h3>{debouncedSearchQuery ? 'No matching papers' : 'No papers in corpus'}</h3>
+              <p>{debouncedSearchQuery ? 'Try adjusting your search query' : 'Papers will appear here once added to the corpus'}</p>
             </div>
           ) : (
             <>
@@ -294,7 +322,7 @@ function CorpusManagement({ isEmbedded = false }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPapers.map((paper) => (
+                  {papers.map((paper) => (
                     <tr key={paper.id}>
                       <td style={{ color: '#6b7280', fontWeight: 500 }}>#{paper.id}</td>
                       <td>
@@ -347,8 +375,11 @@ function CorpusManagement({ isEmbedded = false }) {
               <div className="dashboard-pagination">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <span className="dashboard-pagination-info">
-                    Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalPapers)} of {totalPapers} entries
+                    Showing {startEntry} to {endEntry} of {totalPapers} entries
                   </span>
+                  {isFetching && (
+                    <span style={{ fontSize: '13px', color: '#6b7280' }}>Updating...</span>
+                  )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '13px', color: '#6b7280' }}>Show</span>
                     {showCustomInput ? (

@@ -161,6 +161,8 @@
   border-radius: 10px;
   font-size: 15px;
   color: #1a1a2e;
+  -webkit-text-fill-color: #1a1a2e;
+  caret-color: #111827;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
   background-color: #fff;
@@ -173,6 +175,13 @@
 
 .auth-input-field::placeholder {
   color: #9ca3af;
+  -webkit-text-fill-color: #9ca3af;
+  opacity: 1;
+}
+
+.auth-input-field[type="password"]::placeholder {
+  color: rgba(17, 24, 39, 0.38);
+  -webkit-text-fill-color: rgba(17, 24, 39, 0.38);
 }
 
 .auth-input-field:focus {
