@@ -22,8 +22,16 @@ function CorpusManagement({ isEmbedded = false }) {
   const [customValue, setCustomValue] = useState('');
   const [totalPapers, setTotalPapers] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [paperTitle, setPaperTitle] = useState('');
+  const [paperAuthor, setPaperAuthor] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
   const previousDebouncedSearchRef = useRef('');
+  const fileInputRef = useRef(null);
   const navigate = useNavigate();
+  const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'text/plain'];
+  const allowedExtensions = ['.pdf', '.docx', '.doc', '.txt'];
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -117,6 +125,64 @@ function CorpusManagement({ isEmbedded = false }) {
   const handleDeleteCancel = () => {
     setShowDeleteModal(false);
     setPaperToDelete(null);
+  };
+
+  const resetUploadState = () => {
+    setShowUploadModal(false);
+    setPendingFile(null);
+    setPaperTitle('');
+    setPaperAuthor('');
+    setIsUploading(false);
+  };
+
+  const handleBrowseClick = () => {
+    setError('');
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    e.target.value = '';
+
+    if (!selectedFile) {
+      return;
+    }
+
+    const fileName = selectedFile.name || '';
+    const fileExt = fileName.includes('.') ? `.${fileName.split('.').pop().toLowerCase()}` : '';
+    const isAllowedType = allowedTypes.includes(selectedFile.type) || allowedExtensions.includes(fileExt);
+    if (!isAllowedType) {
+      setError('Invalid file type. Please upload PDF, DOCX, DOC, or TXT files.');
+      return;
+    }
+
+    setError('');
+    setPendingFile(selectedFile);
+    setPaperTitle(fileName.replace(/\.[^/.]+$/, '') || fileName);
+    setPaperAuthor('');
+    setShowUploadModal(true);
+  };
+
+  const handleUploadCancel = () => {
+    if (isUploading) return;
+    resetUploadState();
+  };
+
+  const handleUploadSubmit = async (e) => {
+    e.preventDefault();
+    if (!pendingFile || !paperTitle.trim() || isUploading) return;
+
+    setIsUploading(true);
+    setError('');
+
+    try {
+      await corpusAPI.upload(pendingFile, paperTitle.trim(), paperAuthor.trim());
+      resetUploadState();
+      fetchPapers();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Upload failed. Please try again.');
+      setIsUploading(false);
+    }
   };
 
   const handleLogout = () => {
@@ -264,10 +330,28 @@ function CorpusManagement({ isEmbedded = false }) {
         {/* Page Header */}
         <section className="dashboard-welcome" style={{ display: 'block', marginBottom: '24px' }}>
           <h1 className="dashboard-welcome-title">Corpus Management</h1>
-          <p className="dashboard-welcome-subtitle" style={{ marginBottom: 0 }}>
-            Manage and monitor the document corpus used for plagiarism detection.
-            View, search, and remove papers from the indexed collection.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginTop: '8px' }}>
+            <p className="dashboard-welcome-subtitle" style={{ marginBottom: 0, flex: 1 }}>
+              Manage and monitor the document corpus used for plagiarism detection.
+              View, search, and remove papers from the indexed collection.
+            </p>
+            <div className="dashboard-welcome-actions" style={{ marginTop: 0, flexShrink: 0 }}>
+              <button className="dashboard-btn-primary" onClick={handleBrowseClick} disabled={isUploading}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Upload New Paper
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.txt"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
+            </div>
+          </div>
         </section>
 
         {error && (
@@ -490,6 +574,63 @@ function CorpusManagement({ isEmbedded = false }) {
                 {isDeleting ? 'Deleting...' : 'Delete Permanently'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Metadata Modal */}
+      {showUploadModal && (
+        <div className="dashboard-modal-overlay">
+          <div className="dashboard-modal">
+            <div className="dashboard-modal-header">
+              <h3>Upload Paper to Corpus</h3>
+              <p>Review metadata before adding this paper to the indexed corpus</p>
+            </div>
+            <form onSubmit={handleUploadSubmit}>
+              <div className="dashboard-modal-body">
+                <div className="dashboard-form-group">
+                  <label htmlFor="corpus-title">Paper Title</label>
+                  <input
+                    id="corpus-title"
+                    type="text"
+                    className="dashboard-modal-input"
+                    value={paperTitle}
+                    onChange={(e) => setPaperTitle(e.target.value)}
+                    placeholder="Enter paper title"
+                    autoFocus
+                    required
+                  />
+                </div>
+                <div className="dashboard-form-group">
+                  <label htmlFor="corpus-author">Author</label>
+                  <input
+                    id="corpus-author"
+                    type="text"
+                    className="dashboard-modal-input"
+                    value={paperAuthor}
+                    onChange={(e) => setPaperAuthor(e.target.value)}
+                    placeholder="Enter author name (optional)"
+                  />
+                </div>
+              </div>
+              <div className="dashboard-modal-footer">
+                <button
+                  type="button"
+                  className="dashboard-modal-btn dashboard-modal-btn-secondary"
+                  onClick={handleUploadCancel}
+                  disabled={isUploading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="dashboard-modal-btn dashboard-modal-btn-primary"
+                  disabled={isUploading || !paperTitle.trim()}
+                >
+                  {isUploading ? 'Uploading...' : 'Upload to Corpus'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
