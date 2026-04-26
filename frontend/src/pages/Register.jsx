@@ -24,7 +24,7 @@ function Register() {
 
     setLoading(true);
     try {
-      await register(username, email, password);
+      await register(username.trim(), email.trim(), password);
       navigate("/dashboard");
     } catch (err) {
       setError(err.response?.data?.error || "Registration failed. Please try again.");

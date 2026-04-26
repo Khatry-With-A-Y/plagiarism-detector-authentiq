@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import useAuth from '../../hooks/useAuth';
 import useFetchResults from '../../hooks/useFetchResults';
+import reviewsAPI from '../../api/reviews';
 import HighlightedText from '../../components/HighlightedText';
 import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
 import '../dashboard.css';
@@ -13,6 +14,52 @@ function Results({ id: propId, isEmbedded }) {
   const { user } = useAuth();
   const { results, submission, loading, error, refresh } = useFetchResults(id);
   const [expandedSource, setExpandedSource] = useState(null);
+  const [isEligible, setIsEligible] = useState(false);
+  const [eligibilityLoading, setEligibilityLoading] = useState(true);
+  const [requestLoading, setRequestLoading] = useState(false);
+  const [requestSuccess, setRequestSuccess] = useState(false);
+  const [requestError, setRequestError] = useState(null);
+
+  useEffect(() => {
+    if (!submission) return;
+    if (submission.status !== 'completed') {
+      setEligibilityLoading(false);
+      return;
+    }
+    // If review already requested, no need to check eligibility
+    if (submission.review_status) {
+      setEligibilityLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const fetchEligibility = async () => {
+      try {
+        const response = await reviewsAPI.checkEligibility(id);
+        if (!cancelled) setIsEligible(response.data.eligible === true);
+      } catch (err) {
+        console.error('Eligibility check failed:', err.response?.status, err.response?.data || err.message);
+        if (!cancelled) setIsEligible(false);
+      } finally {
+        if (!cancelled) setEligibilityLoading(false);
+      }
+    };
+    fetchEligibility();
+    return () => { cancelled = true; };
+  }, [id, submission?.id, submission?.status, submission?.review_status]);
+
+  const handleRequestReview = async () => {
+    setRequestLoading(true);
+    setRequestError(null);
+    try {
+      await reviewsAPI.requestReview(id, 'CS');
+      setRequestSuccess(true);
+      if (refresh) refresh();
+    } catch (err) {
+      setRequestError(err.response?.data?.error || "Failed to request review");
+    } finally {
+      setRequestLoading(false);
+    }
+  };
 
   const getUserInitials = () => {
     if (!user?.username) return 'U';
@@ -227,6 +274,59 @@ function Results({ id: propId, isEmbedded }) {
                 )}
               </div>
             </div>
+
+            {/* Peer Review Section */}
+            {submission.status === 'completed' && (
+              <div className="dashboard-reports" style={{ marginBottom: '24px', padding: '24px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '8px' }}>Peer Review & Corpus Inclusion</h3>
+                    {submission.review_status ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span className={`dashboard-risk-badge ${
+                          submission.review_status === 'approved' ? 'low' : 
+                          submission.review_status === 'rejected' ? 'critical' : 'pending'
+                        }`}>
+                          {submission.review_status.charAt(0).toUpperCase() + submission.review_status.slice(1).replace('_', ' ')}
+                        </span>
+                        <span style={{ fontSize: '14px', color: '#64748b' }}>
+                          Requested on {new Date(submission.review_requested_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ) : eligibilityLoading ? (
+                      <p style={{ fontSize: '14px', color: '#64748b' }}>Checking eligibility for peer review...</p>
+                    ) : isEligible ? (
+                      <p style={{ fontSize: '14px', color: '#64748b', maxWidth: '600px' }}>
+                        This submission meets the eligibility criteria for peer review. You can request trusted reviewers to verify its originality and include it in our verified academic corpus.
+                      </p>
+                    ) : (
+                      <p style={{ fontSize: '14px', color: '#dc2626' }}>
+                        This submission is not eligible for peer review. The similarity score or sentence match exceeds the 20% threshold.
+                      </p>
+                    )}
+                  </div>
+                  
+                  {!submission.review_status && isEligible && (
+                    <button 
+                      className="dashboard-btn-primary" 
+                      onClick={handleRequestReview}
+                      disabled={requestLoading || requestSuccess}
+                      style={{ padding: '12px 24px' }}
+                    >
+                      {requestLoading ? "Submitting..." : requestSuccess ? "Request Submitted" : "Request Peer Review"}
+                    </button>
+                  )}
+                </div>
+                {requestError && (
+                  <p style={{ color: '#dc2626', fontSize: '12px', marginTop: '12px' }}>{requestError}</p>
+                )}
+                {requestSuccess && (
+                  <p style={{ color: '#16a34a', fontSize: '14px', marginTop: '12px', fontWeight: '500' }}>
+                    Your request has been submitted. It will be assigned to a panel of expert reviewers shortly.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Results Table */}
             <div className="dashboard-reports">

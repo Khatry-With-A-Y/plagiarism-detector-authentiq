@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from ..utils.database import get_db_connection
 
 
@@ -8,6 +8,8 @@ class User:
     @staticmethod
     def create(username, email, password_hash, role='user'):
         """Create a new user"""
+        username = username.strip() if username else username
+        email = email.strip() if email else email
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
@@ -26,9 +28,10 @@ class User:
     @staticmethod
     def get_by_username(username):
         """Get user by username"""
+        username = username.strip() if username else username
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+        cursor.execute("SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at FROM users WHERE username = ?", (username,))
         user = cursor.fetchone()
         conn.close()
         return dict(user) if user else None
@@ -38,7 +41,7 @@ class User:
         """Get user by ID"""
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+        cursor.execute("SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at FROM users WHERE id = ?", (user_id,))
         user = cursor.fetchone()
         conn.close()
         return dict(user) if user else None
@@ -46,9 +49,10 @@ class User:
     @staticmethod
     def get_by_email(email):
         """Get user by email"""
+        email = email.strip() if email else email
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+        cursor.execute("SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at FROM users WHERE email = ?", (email,))
         user = cursor.fetchone()
         conn.close()
         return dict(user) if user else None
@@ -58,7 +62,11 @@ class User:
         """Get all users"""
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT id, username, email, role, status, created_at FROM users ORDER BY created_at DESC')
+        cursor.execute('''
+            SELECT id, username, email, role, status, 
+                   strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at 
+            FROM users ORDER BY created_at DESC
+        ''')
         users = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return users
@@ -99,7 +107,10 @@ class Paper:
         """Get all papers in corpus"""
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM papers ORDER BY uploaded_at DESC')
+        cursor.execute('''
+            SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', uploaded_at) as uploaded_at 
+            FROM papers ORDER BY uploaded_at DESC
+        ''')
         papers = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return papers
@@ -141,7 +152,8 @@ class Paper:
         else:
             # Get paginated papers
             cursor.execute('''
-                SELECT * FROM papers 
+                SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', uploaded_at) as uploaded_at 
+                FROM papers 
                 ORDER BY id ASC
                 LIMIT ? OFFSET ?
             ''', (limit, offset))
@@ -159,7 +171,7 @@ class Paper:
         """Get paper by ID"""
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM papers WHERE id = ?', (paper_id,))
+        cursor.execute("SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', uploaded_at) as uploaded_at FROM papers WHERE id = ?", (paper_id,))
         paper = cursor.fetchone()
         conn.close()
         return dict(paper) if paper else None
@@ -238,15 +250,15 @@ class Paper:
 
 class Submission:
     @staticmethod
-    def create(user_id, filename, file_path, content_text, main_content=None, reference_section=None, has_references=False):
+    def create(user_id, filename, file_path, content_text, main_content=None, reference_section=None, has_references=False, domain_tag='CS'):
         """Create a new submission with reference exclusion support"""
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO submissions (user_id, filename, file_path, content_text, 
-                                   main_content, reference_section, has_references, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-        ''', (user_id, filename, file_path, content_text, main_content, reference_section, has_references))
+                                   main_content, reference_section, has_references, status, domain_tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        ''', (user_id, filename, file_path, content_text, main_content, reference_section, has_references, domain_tag))
         conn.commit()
         submission_id = cursor.lastrowid
         conn.close()
@@ -257,7 +269,13 @@ class Submission:
         """Get submission by ID"""
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM submissions WHERE id = ?', (submission_id,))
+        cursor.execute('''
+            SELECT *, 
+                   strftime('%Y-%m-%dT%H:%M:%SZ', uploaded_at) as uploaded_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', review_requested_at) as review_requested_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', admin_decided_at) as admin_decided_at
+            FROM submissions WHERE id = ?
+        ''', (submission_id,))
         submission = cursor.fetchone()
         conn.close()
         
@@ -277,7 +295,11 @@ class Submission:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT * FROM submissions 
+            SELECT *, 
+                   strftime('%Y-%m-%dT%H:%M:%SZ', uploaded_at) as uploaded_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', review_requested_at) as review_requested_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', admin_decided_at) as admin_decided_at
+            FROM submissions 
             WHERE user_id = ? 
             ORDER BY uploaded_at DESC
         ''', (user_id,))
@@ -314,6 +336,130 @@ class Submission:
         ''', (filename, submission_id))
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def get_eligibility(submission_id):
+        """
+        Check if a submission is eligible for peer review.
+        eligible = max(doc_score) < T AND max(sentence_score) < T
+        """
+        from ...config import REVIEW_ELIGIBILITY_UPPER
+        
+        # We need results to check doc_score
+        results = SimilarityResult.get_by_submission(submission_id)
+        
+        # If no matches found, we treat it as 0% similarity (eligible)
+        max_doc_score = max((r['similarity_score'] for r in results), default=0) if results else 0
+        
+        # Calculate highest exact match (sentence-level)
+        highest_exact_match = 0
+        if results:
+            for r in results:
+                match_details_str = r.get('match_details')
+                if match_details_str:
+                    try:
+                        md = json.loads(match_details_str)
+                        score = md.get('highest_match_score', 0)
+                        if score > highest_exact_match:
+                            highest_exact_match = score
+                    except: pass
+        
+        is_eligible = max_doc_score < REVIEW_ELIGIBILITY_UPPER and highest_exact_match < REVIEW_ELIGIBILITY_UPPER
+        
+        return {
+            'eligible': is_eligible,
+            'max_doc_score': max_doc_score,
+            'max_sentence_score': highest_exact_match,
+            'threshold': REVIEW_ELIGIBILITY_UPPER
+        }
+
+    @staticmethod
+    def request_review(submission_id, user_id, domain_tag='CS'):
+        """Transition a submission to 'pending' review status"""
+        eligibility = Submission.get_eligibility(submission_id)
+        if not eligibility['eligible']:
+            raise ValueError("Submission is not eligible for peer review (similarity too high)")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            # Enforce idx_one_active_request logic: only one active review request per submission
+            # In the v2 schema, this is naturally handled as columns on the submission row.
+            # We check if review_status is already set.
+            cursor.execute('SELECT review_status FROM submissions WHERE id = ?', (submission_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Submission not found")
+            
+            if row['review_status'] and row['review_status'] not in ('approved', 'rejected'):
+                raise ValueError("An active review request already exists for this submission")
+
+            cursor.execute('''
+                UPDATE submissions 
+                SET review_status = 'pending',
+                    review_requested_at = CURRENT_TIMESTAMP,
+                    review_requested_by = ?,
+                    domain_tag = ?,
+                    review_votes = '[]',
+                    pass_votes = 0,
+                    fail_votes = 0,
+                    review_outcome = NULL,
+                    admin_decision = NULL,
+                    admin_decided_by = NULL,
+                    admin_decided_at = NULL,
+                    admin_decision_reason = NULL
+                WHERE id = ?
+            ''', (user_id, domain_tag, submission_id))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_admin_review_queue(status=None, page=1, limit=50):
+        """List submissions in the peer review queue for admin"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        offset = (page - 1) * limit
+        
+        query = '''
+            SELECT s.*, u.username as submitter_name,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', s.uploaded_at) as uploaded_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', s.review_requested_at) as review_requested_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', s.admin_decided_at) as admin_decided_at
+            FROM submissions s 
+            JOIN users u ON s.user_id = u.id 
+            WHERE s.review_status IS NOT NULL
+        '''
+        params = []
+        if status:
+            query += ' AND s.review_status = ?'
+            params.append(status)
+        
+        query += ' ORDER BY s.review_requested_at DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        requests = [dict(row) for row in cursor.fetchall()]
+        
+        # Get total count
+        count_query = 'SELECT COUNT(*) as total FROM submissions WHERE review_status IS NOT NULL'
+        if status:
+            count_query += ' AND review_status = ?'
+            cursor.execute(count_query, (status,))
+        else:
+            cursor.execute(count_query)
+            
+        total = cursor.fetchone()['total']
+        conn.close()
+        
+        return {
+            'requests': requests,
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'pages': (total + limit - 1) // limit
+        }
 
     @staticmethod
     def delete(submission_id):
@@ -364,7 +510,8 @@ class SimilarityResult:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT sr.*, p.title, p.author, p.filename
+            SELECT sr.*, p.title, p.author, p.filename,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', sr.created_at) as created_at
             FROM similarity_results sr
             JOIN papers p ON sr.paper_id = p.id
             WHERE sr.submission_id = ?
@@ -377,3 +524,267 @@ class SimilarityResult:
         results = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return results
+
+class Reviewer:
+    @staticmethod
+    def apply(user_id, institution_domain, institution_name, affiliation, institutional_email, bio, expertise_tags=["CS"]):
+        """Create or update a reviewer application"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            expertise_tags_json = json.dumps(expertise_tags)
+            cursor.execute('''
+                INSERT INTO reviewers (user_id, institution_domain, institution_name, affiliation, 
+                                     institutional_email, bio, expertise_tags, application_status, submitted_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    institution_domain=excluded.institution_domain,
+                    institution_name=excluded.institution_name,
+                    affiliation=excluded.affiliation,
+                    institutional_email=excluded.institutional_email,
+                    bio=excluded.bio,
+                    expertise_tags=excluded.expertise_tags,
+                    application_status='pending',
+                    submitted_at=CURRENT_TIMESTAMP,
+                    decision_reason=NULL,
+                    reviewed_at=NULL,
+                    reviewed_by=NULL,
+                    revoked_at=NULL,
+                    revoked_by=NULL,
+                    revoke_reason=NULL
+            ''', (user_id, institution_domain, institution_name, affiliation, institutional_email, bio, expertise_tags_json))
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError as e:
+            if "UNIQUE constraint failed: reviewers.institutional_email" in str(e):
+                raise ValueError("Institutional email already in use by another applicant.")
+            raise ValueError(f"Application failed: {str(e)}")
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_by_user_id(user_id):
+        """Get reviewer record by user ID"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT *,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', submitted_at) as submitted_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', reviewed_at) as reviewed_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', verified_at) as verified_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', revoked_at) as revoked_at
+            FROM reviewers WHERE user_id = ?
+        ''', (user_id,))
+        reviewer = cursor.fetchone()
+        conn.close()
+        if reviewer:
+            r_dict = dict(reviewer)
+            if r_dict['expertise_tags']:
+                r_dict['expertise_tags'] = json.loads(r_dict['expertise_tags'])
+            return r_dict
+        return None
+
+    @staticmethod
+    def list_applications(status=None, page=1, limit=50):
+        """List reviewer applications for admin"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        offset = (page - 1) * limit
+        
+        query = '''
+            SELECT r.*, u.username, u.email,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.submitted_at) as submitted_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.reviewed_at) as reviewed_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.verified_at) as verified_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.revoked_at) as revoked_at
+            FROM reviewers r 
+            JOIN users u ON r.user_id = u.id
+        '''
+        params = []
+        if status:
+            query += ' WHERE r.application_status = ?'
+            params.append(status)
+        
+        query += ' ORDER BY r.submitted_at DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        apps = [dict(row) for row in cursor.fetchall()]
+        
+        for a in apps:
+            if a['expertise_tags']:
+                a['expertise_tags'] = json.loads(a['expertise_tags'])
+        
+        # Get total count
+        count_query = 'SELECT COUNT(*) as total FROM reviewers'
+        if status:
+            count_query += ' WHERE application_status = ?'
+            cursor.execute(count_query, [status])
+        else:
+            cursor.execute(count_query)
+        total = cursor.fetchone()['total']
+        
+        conn.close()
+        return apps, total
+
+    @staticmethod
+    def decide(user_id, admin_id, decision, reason=None):
+        """Admin decision on reviewer application"""
+        if decision not in ['approved', 'rejected']:
+            raise ValueError("Invalid decision")
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            conn.execute('BEGIN TRANSACTION')
+            
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('''
+                UPDATE reviewers SET 
+                    application_status = ?,
+                    decision_reason = ?,
+                    reviewed_at = ?,
+                    reviewed_by = ?,
+                    verified_at = ?
+                WHERE user_id = ?
+            ''', (decision, reason, now, admin_id, (now if decision == 'approved' else None), user_id))
+            
+            if decision == 'approved':
+                cursor.execute('UPDATE users SET role = "reviewer" WHERE id = ?', (user_id,))
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+    @staticmethod
+    def revoke(user_id, admin_id, reason=None):
+        """Revoke reviewer status"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            conn.execute('BEGIN TRANSACTION')
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('''
+                UPDATE reviewers SET 
+                    revoked_at = ?,
+                    revoked_by = ?,
+                    revoke_reason = ?,
+                    application_status = 'rejected'
+                WHERE user_id = ?
+            ''', (now, admin_id, reason, user_id))
+            
+            cursor.execute('UPDATE users SET role = "user" WHERE id = ?', (user_id,))
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+class Institution:
+    @staticmethod
+    def get_allowed():
+        """Get list of allowed institutions from config"""
+        from ...config import ALLOWED_INSTITUTION_DOMAINS
+        return ALLOWED_INSTITUTION_DOMAINS
+
+class Notification:
+    @staticmethod
+    def create(user_id, title, message, type='info'):
+        """Create a new notification"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO notifications (user_id, title, message, type)
+                VALUES (?, ?, ?, ?)
+            ''', (user_id, title, message, type))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_by_user(user_id, limit=20):
+        """Get notifications for a user"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, user_id, type, title, message, is_read, 
+                   strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at
+            FROM notifications 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        ''', (user_id, limit))
+        notifications = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return notifications
+
+    @staticmethod
+    def get_by_user_for_admin(user_id, type_filter=None):
+        """Get notifications for a specific user (admin use only)"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if type_filter:
+            cursor.execute('''
+                SELECT id, user_id, type, title, message, is_read,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at
+                FROM notifications
+                WHERE user_id = ? AND type = ?
+                ORDER BY created_at DESC
+            ''', (user_id, type_filter))
+        else:
+            cursor.execute('''
+                SELECT id, user_id, type, title, message, is_read,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at
+                FROM notifications
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            ''', (user_id,))
+        notifications = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return notifications
+
+    @staticmethod
+    def get_unread_count(user_id):
+        """Get count of unread notifications for a user"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0', (user_id,))
+        count = cursor.fetchone()['count']
+        conn.close()
+        return count
+
+    @staticmethod
+    def mark_as_read(notification_id, user_id):
+        """Mark a notification as read"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?', (notification_id, user_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def mark_all_as_read(user_id):
+        """Mark all notifications as read for a user"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE notifications SET is_read = 1 WHERE user_id = ?', (user_id,))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def delete(notification_id, user_id):
+        """Delete a notification"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM notifications WHERE id = ? AND user_id = ?', (notification_id, user_id))
+        conn.commit()
+        conn.close()

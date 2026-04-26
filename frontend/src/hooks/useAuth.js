@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { register as apiRegister, login as apiLogin } from '../api/auth';
+import { register as apiRegister, login as apiLogin, getCurrentUser as apiGetCurrentUser } from '../api/auth';
 import {
   setAuthToken,
   setUser as storeUser,
@@ -46,8 +46,21 @@ export default function useAuth() {
     setUser(null);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await apiGetCurrentUser();
+      const userData = res.data;
+      storeUser(userData);
+      setUser(userData);
+      return userData;
+    } catch (err) {
+      console.error("Failed to refresh user info:", err);
+    }
+  }, []);
+
   const isAdmin = user?.role === 'admin';
+  const isReviewer = user?.role === 'reviewer';
   const isAuthenticated = !!user;
 
-  return { user, login, register, logout, isAdmin, isAuthenticated };
+  return { user, login, register, logout, refreshUser, isAdmin, isReviewer, isAuthenticated };
 }

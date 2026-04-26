@@ -4,6 +4,8 @@ import { adminAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import CorpusManagement from './CorpusManagement';
 import UserManagement from './UserManagement';
+import ReviewerApplications from './ReviewerApplications';
+import ReviewQueue from './ReviewQueue';
 import '../dashboard.css';
 import './adminStatistics.css';
 
@@ -208,6 +210,30 @@ function AdminDashboard() {
               </svg>
               Corpus Management
             </button>
+            <button
+              className={`dashboard-nav-link ${activeTab === 'reviewers' ? 'active' : ''}`}
+              onClick={() => setActiveTab('reviewers')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="8.5" cy="7" r="4"></circle>
+                <polyline points="17 11 19 13 23 9"></polyline>
+              </svg>
+              Reviewer Onboarding
+            </button>
+            <button
+              className={`dashboard-nav-link ${activeTab === 'review-queue' ? 'active' : ''}`}
+              onClick={() => setActiveTab('review-queue')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <path d="M9 15.5l2 2 4-4"></path>
+              </svg>
+              Peer Review Queue
+            </button>
           </div>
         </div>
         <div className="dashboard-navbar-right">
@@ -249,6 +275,14 @@ function AdminDashboard() {
         <CorpusManagement isEmbedded={true} />
       ) : activeTab === 'users' ? (
         <UserManagement isEmbedded={true} />
+      ) : activeTab === 'reviewers' ? (
+        <main className="dashboard-main">
+          <ReviewerApplications />
+        </main>
+      ) : activeTab === 'review-queue' ? (
+        <main className="dashboard-main">
+          <ReviewQueue />
+        </main>
       ) : (
       <main className="dashboard-main">
         {/* Header */}

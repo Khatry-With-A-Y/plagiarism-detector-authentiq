@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
+import { notificationsAPI } from '../../api/notifications';
 import useAuth from '../../hooks/useAuth';
 import Results from './Results';
 import UserStatistics from './UserStatistics';
+import ApplyReviewer from '../reviewer/ApplyReviewer';
 import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
 import '../dashboard.css';
 
@@ -19,6 +21,7 @@ function UserDashboard() {
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [newFilename, setNewFilename] = useState('');
   const [pendingFile, setPendingFile] = useState(null);
+  const [domainTag, setDomainTag] = useState('CS');
   const [isUploading, setIsUploading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [submissionToDelete, setSubmissionToDelete] = useState(null);
@@ -26,11 +29,18 @@ function UserDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [openTabs, setOpenTabs] = useState([]);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [showReviewerApp, setShowReviewerApp] = useState(false);
+  const [reviewerAppSubmitted, setReviewerAppSubmitted] = useState(false);
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const itemsPerPage = 5;
   const fileInputRef = useRef(null);
   const navTabsContainerRef = useRef(null);
+  const notificationsRef = useRef(null);
+  const userMenuRef = useRef(null);
   const navigate = useNavigate();
 
   const checkScrollability = () => {
@@ -70,6 +80,7 @@ function UserDashboard() {
       return;
     }
     fetchSubmissions();
+    fetchNotifications();
 
     // Set up polling for pending/processing submissions
     const pollInterval = setInterval(() => {
@@ -77,10 +88,59 @@ function UserDashboard() {
       if (hasProcessing) {
         fetchSubmissions();
       }
+      fetchNotifications(); // Also poll notifications
     }, 3000); // Poll every 3 seconds
 
-    return () => clearInterval(pollInterval);
-  }, [navigate, user, submissions.length, submissions.some(s => s.status === 'pending' || s.status === 'processing')]);
+    // Click outside handlers
+    const handleClickOutside = (event) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
+        setShowNotifications(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [navigate, user, submissions.length]);
+
+  const fetchNotifications = async () => {
+    try {
+      const response = await notificationsAPI.getAll(5);
+      setNotifications(response.data.notifications || []);
+      setUnreadCount(response.data.unread_count || 0);
+    } catch (err) {
+      console.error('Failed to fetch notifications:', err);
+    }
+  };
+
+  const handleMarkAsRead = async (notifId) => {
+    try {
+      await notificationsAPI.markAsRead(notifId);
+      fetchNotifications();
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      await notificationsAPI.markAllAsRead();
+      fetchNotifications();
+    } catch (err) {
+      console.error('Failed to mark all as read:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (showReviewerApp && activeTab !== 'reviewer-apply' && !reviewerAppSubmitted) {
+      setShowReviewerApp(false);
+    }
+  }, [activeTab, showReviewerApp, reviewerAppSubmitted]);
 
   const fetchSubmissions = async () => {
     try {
@@ -118,6 +178,7 @@ function UserDashboard() {
       const formData = new FormData();
       formData.append('file', pendingFile);
       formData.append('filename', newFilename.trim());
+      formData.append('domain_tag', domainTag);
       
       await submissionsAPI.upload(formData);
       
@@ -137,6 +198,7 @@ function UserDashboard() {
     setShowRenameModal(false);
     setPendingFile(null);
     setNewFilename('');
+    setDomainTag('CS');
   };
 
   const handleDeleteClick = (submission) => {
@@ -373,6 +435,32 @@ function UserDashboard() {
                 </svg>
                 My Statistics
               </button>
+              {showReviewerApp && (
+                <div
+                  className={`dashboard-nav-link ${activeTab === 'reviewer-apply' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('reviewer-apply')}
+                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, paddingRight: '8px' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="8.5" cy="7" r="4"></circle>
+                    <polyline points="17 11 19 13 23 9"></polyline>
+                  </svg>
+                  Reviewer Application
+                  {!reviewerAppSubmitted && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setShowReviewerApp(false); if(activeTab === 'reviewer-apply') setActiveTab('dashboard'); }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', color: 'inherit', marginLeft: 'auto' }}
+                      title="Close application"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             {showLeftScroll && (
               <button
@@ -472,15 +560,63 @@ function UserDashboard() {
           </div>
         </div>
         <div className="dashboard-navbar-right">
-          <button className="dashboard-icon-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-              <path d="M13.73 21a2 2 0 01-3.46 0"/>
-            </svg>
-          </button>
-          <div className="dashboard-user-menu">
+          <div className="dashboard-notifications" ref={notificationsRef}>
+            <button 
+              className="dashboard-icon-btn" 
+              onClick={() => setShowNotifications(!showNotifications)}
+              title="Notifications"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 01-3.46 0"/>
+              </svg>
+              {unreadCount > 0 && (
+                <span className="notification-badge">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+            
+            {showNotifications && (
+              <div className="dashboard-notifications-dropdown">
+                <div className="notifications-header">
+                  <h3>Notifications</h3>
+                  {unreadCount > 0 && (
+                    <button className="mark-all-btn" onClick={handleMarkAllAsRead}>
+                      Mark all as read
+                    </button>
+                  )}
+                </div>
+                <div className="notification-list">
+                  {notifications.length > 0 ? (
+                    notifications.map(notification => (
+                      <div 
+                        key={notification.id} 
+                        className={`notification-item ${!notification.is_read ? 'unread' : ''}`}
+                        onClick={() => {
+                          if (!notification.is_read) handleMarkAsRead(notification.id);
+                        }}
+                      >
+                        <div className="notification-title">{notification.title}</div>
+                        <div className="notification-message">{notification.message}</div>
+                        <div className="notification-time">
+                          {new Date(notification.created_at).toLocaleString()}
+                        </div>
+                        {!notification.is_read && <div className="notification-unread-dot" />}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="notifications-empty">
+                      No notifications yet
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="dashboard-user-menu" ref={userMenuRef}>
             <div className="dashboard-avatar" onClick={() => setShowUserMenu(!showUserMenu)}>
-              <img src="https://ui-avatars.com/api/?name=User&background=1e40af&color=fff" alt="User" />
+              <img src={`https://ui-avatars.com/api/?name=${user?.username || 'User'}&background=1e40af&color=fff`} alt="User" />
             </div>
             {showUserMenu && (
               <div className="dashboard-dropdown">
@@ -491,6 +627,16 @@ function UserDashboard() {
                   </svg>
                   Profile
                 </button>
+                {user.role === 'user' && (
+                  <button className="dashboard-dropdown-item" onClick={() => { setShowReviewerApp(true); setActiveTab('reviewer-apply'); setShowUserMenu(false); }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="8.5" cy="7" r="4"></circle>
+                      <polyline points="17 11 19 13 23 9"></polyline>
+                    </svg>
+                    Become a Reviewer
+                  </button>
+                )}
                 <button className="dashboard-dropdown-item danger" onClick={handleLogout}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
@@ -508,6 +654,17 @@ function UserDashboard() {
       {/* Main Content */}
       {activeTab === 'statistics' ? (
         <UserStatistics isEmbedded={true} />
+      ) : activeTab === 'reviewer-apply' ? (
+        <ApplyReviewer 
+          isEmbedded={true} 
+          onSubmitted={() => setReviewerAppSubmitted(true)} 
+          onCancel={() => {
+            if (!reviewerAppSubmitted) {
+              setShowReviewerApp(false);
+            }
+            setActiveTab('dashboard');
+          }} 
+        />
       ) : activeTab !== 'dashboard' ? (
         <Results id={activeTab} isEmbedded={true} />
       ) : (
@@ -515,7 +672,14 @@ function UserDashboard() {
         {/* Welcome Section */}
         <section className="dashboard-welcome">
           <div className="dashboard-welcome-left">
-            <h1 className="dashboard-welcome-title">Welcome to Authentiq, {user?.username ? user.username.charAt(0).toUpperCase() + user.username.slice(1) : ''}!</h1>
+            <h1 className="dashboard-welcome-title">
+              Welcome to Authentiq, {user?.username ? user.username.charAt(0).toUpperCase() + user.username.slice(1) : ''}!
+              {user?.role !== 'user' && (
+                <span className={`dashboard-user-role ${user?.role}`}>
+                  {user?.role.charAt(0).toUpperCase() + user?.role.slice(1)}
+                </span>
+              )}
+            </h1>
             <p className="dashboard-welcome-subtitle">
               Maintain the highest standards of academic integrity. Upload your documents
               for a comprehensive scan against millions of sources and receive detailed
@@ -529,6 +693,16 @@ function UserDashboard() {
                 </svg>
                 Upload New Paper
               </button>
+              {user?.role === 'user' && (
+                <button className="dashboard-btn-outline" onClick={() => { setShowReviewerApp(true); setActiveTab('reviewer-apply'); }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}>
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="8.5" cy="7" r="4"></circle>
+                    <polyline points="17 11 19 13 23 9"></polyline>
+                  </svg>
+                  Become a Reviewer
+                </button>
+              )}
               <button className="dashboard-btn-outline">
                 Learn How it Works
               </button>
@@ -910,6 +1084,22 @@ function UserDashboard() {
                     autoFocus
                     required
                   />
+                </div>
+                <div className="dashboard-form-group" style={{ marginTop: '16px' }}>
+                  <label htmlFor="domain_tag">Subject Domain</label>
+                  <select
+                    id="domain_tag"
+                    className="dashboard-modal-input"
+                    value={domainTag}
+                    onChange={(e) => setDomainTag(e.target.value)}
+                    required
+                    style={{ height: '42px', cursor: 'pointer' }}
+                  >
+                    <option value="CS">Computer Science (CS)</option>
+                  </select>
+                  <p style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                    Select the academic domain this paper belongs to for expert review assignment.
+                  </p>
                 </div>
               </div>
               <div className="dashboard-modal-footer">

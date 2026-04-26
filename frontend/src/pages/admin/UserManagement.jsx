@@ -224,7 +224,7 @@ function UserManagement({ isEmbedded = false }) {
                     <td>
                       <div className="usermgmt-user-cell">
                         <img
-                          src={`https://ui-avatars.com/api/?name=${encodeURIComponent(userItem.username || 'User')}&background=${userItem.role === 'admin' ? '1e40af' : '6b7280'}&color=fff`}
+                          src={`https://ui-avatars.com/api/?name=${encodeURIComponent(userItem.username || 'User')}&background=${userItem.role === 'admin' ? '1e40af' : userItem.role === 'reviewer' ? '166534' : '6b7280'}&color=fff`}
                           alt={userItem.username}
                           className="usermgmt-avatar"
                         />
@@ -236,7 +236,7 @@ function UserManagement({ isEmbedded = false }) {
                     </td>
                     <td>
                       <span className={`usermgmt-role-badge ${userItem.role}`}>
-                        {userItem.role === 'admin' ? 'Admin' : 'User'}
+                        {userItem.role.charAt(0).toUpperCase() + userItem.role.slice(1)}
                       </span>
                     </td>
                     <td>

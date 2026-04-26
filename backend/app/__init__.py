@@ -8,6 +8,9 @@ from .utils.database import init_database
 # import blueprints
 from .routes.auth import auth_bp
 from .routes.papers import papers_bp
+from .routes.reviewers import reviewers_bp
+from .routes.reviews import reviews_bp
+from .routes.notifications import notifications_bp
 
 
 def create_app():
@@ -32,5 +35,8 @@ def create_app():
     # register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(papers_bp)
+    app.register_blueprint(reviewers_bp)
+    app.register_blueprint(reviews_bp, url_prefix='/api/reviews')
+    app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
 
     return app

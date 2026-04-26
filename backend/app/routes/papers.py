@@ -57,8 +57,9 @@ def upload_submission():
     file_path = UPLOAD_FOLDER / safe_filename
     file.save(str(file_path))
     
-    # Check for custom filename
+    # Check for custom filename and domain tag
     custom_filename = request.form.get('filename')
+    domain_tag = request.form.get('domain_tag', 'CS')
     final_filename = custom_filename if custom_filename else filename
     
     # Validate file size
@@ -84,7 +85,8 @@ def upload_submission():
             content_text=content_text,
             main_content=main_content,  # Used for plagiarism detection
             reference_section=reference_section,  # Stored but not used for similarity
-            has_references=has_references
+            has_references=has_references,
+            domain_tag=domain_tag
         )
         
         # Start background processing using thread pool
@@ -245,7 +247,11 @@ def get_submission_results(submission_id):
         'has_references': bool(submission.get('has_references', 0)),  # Reference exclusion info
         'reference_excluded': bool(submission.get('main_content')),  # Whether references were excluded
         'results': formatted_results,
-        'documents_compared': len(formatted_results)
+        'documents_compared': len(formatted_results),
+        # Peer-review fields
+        'review_status': submission.get('review_status'),
+        'review_requested_at': submission.get('review_requested_at'),
+        'domain_tag': submission.get('domain_tag', 'CS'),
     }), 200
 
 

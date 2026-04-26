@@ -9,6 +9,7 @@ import Results from './pages/user/Results';
 import UserStatistics from './pages/user/UserStatistics';
 import CorpusManagement from './pages/admin/CorpusManagement';
 import UserManagement from './pages/admin/UserManagement';
+import ApplyReviewer from './pages/reviewer/ApplyReviewer';
 import './index.css';
 
 // Protected Route component
@@ -49,6 +50,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <UserStatistics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reviewer/apply"
+            element={
+              <ProtectedRoute>
+                <ApplyReviewer />
               </ProtectedRoute>
             }
           />

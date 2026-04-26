@@ -246,6 +246,12 @@
   color: #1e40af;
 }
 
+.usermgmt-role-badge.reviewer {
+  background-color: #f0fdf4;
+  color: #166534;
+  border: 1px solid #dcfce7;
+}
+
 .usermgmt-role-badge.user {
   background-color: #f3f4f6;
   color: #6b7280;

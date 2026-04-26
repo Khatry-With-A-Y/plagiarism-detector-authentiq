@@ -14,8 +14,8 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 def register():
     """User registration"""
     data = request.get_json()
-    username = data.get('username')
-    email = data.get('email')
+    username = data.get('username', '').strip() if data.get('username') else None
+    email = data.get('email', '').strip() if data.get('email') else None
     password = data.get('password')
     
     if not all([username, email, password]):
@@ -51,7 +51,7 @@ def register():
 def login():
     """User login"""
     data = request.get_json()
-    username = data.get('username')
+    username = data.get('username', '').strip() if data.get('username') else None
     password = data.get('password')
     
     if not all([username, password]):
