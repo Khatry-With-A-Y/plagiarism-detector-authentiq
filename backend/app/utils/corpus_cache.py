@@ -4,9 +4,18 @@ Thread-safe corpus and IDF cache for plagiarism detection.
 This module provides a singleton cache that:
 1. Loads corpus preprocessed n-grams once, shared by all worker threads
 2. Computes IDF once when corpus changes, reused for all submissions
-3. Automatically invalidates when corpus is modified (paper add/delete)
+3. Invalidated in-process whenever corpus mutates (paper add/delete/promotion)
 
-This eliminates redundant work when processing multiple submissions concurrently.
+Invalidation strategy (single-process Flask):
+- Every code path that mutates the corpus (admin upload, admin delete,
+  peer-review promotion) calls `get_corpus_cache().invalidate()` after
+  committing the DB write. Because we run a single Python process, that
+  invalidate is observed by all subsequent requests.
+- A 60-second TTL acts as a safety backstop in case an invalidate call is
+  ever missed, or the DB is mutated outside the app (manual SQL).
+- For multi-worker deployments (gunicorn --workers > 1) this would need to
+  be replaced with a versioned counter (e.g. a `meta(key,value)` row, Redis
+  INCR, or pub/sub). Documented in limitations-and-future-work.
 """
 
 import math
@@ -39,8 +48,8 @@ class CorpusCache:
         self._corpus: Optional[List[Tuple[int, List[str]]]] = None
         self._corpus_dict: Optional[Dict[int, List[str]]] = None  # paper_id -> ngrams
         self._last_refresh: float = 0
-        self._ttl: float = 60.0  # 60 second TTL
-        self._corpus_version: int = 0  # Incremented on invalidation
+        self._ttl: float = 60.0  # 60 second TTL (safety backstop)
+        self._corpus_version: int = 0  # In-memory monotonic counter; bumped on refresh/invalidate
         # IDF cache
         self._idf_cache: Optional[Dict[str, float]] = None
         self._idf_version: int = -1  # Track which corpus version IDF was computed for
@@ -52,17 +61,24 @@ class CorpusCache:
         """
         Get cached corpus, refreshing if stale.
         Thread-safe: multiple readers can access cached data simultaneously.
+
+        Refresh triggers (any of):
+          1. cache empty (first call after process start)
+          2. invalidate() was called (sets _last_refresh = 0)
+          3. TTL elapsed (60s safety backstop)
         """
         current_time = time.time()
 
-        # Fast path: cache is valid
-        if self._corpus is not None and (current_time - self._last_refresh) < self._ttl:
+        # Fast path: cache populated AND TTL not expired
+        if (self._corpus is not None
+                and (current_time - self._last_refresh) < self._ttl):
             return self._corpus
 
         # Slow path: need to refresh
         with self._data_lock:
-            # Double-check after acquiring lock (another thread may have refreshed)
-            if self._corpus is not None and (current_time - self._last_refresh) < self._ttl:
+            # Double-check after acquiring lock
+            if (self._corpus is not None
+                    and (time.time() - self._last_refresh) < self._ttl):
                 return self._corpus
 
             # Refresh from database

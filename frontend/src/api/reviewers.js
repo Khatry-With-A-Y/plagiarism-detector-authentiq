@@ -15,7 +15,12 @@ export const reviewersAPI = {
   
   adminDecide: (userId, decision, reason) => {
     return api.post(`/reviewers/admin/applications/${userId}/decision`, { decision, reason });
-  }
+  },
+
+  // Block 7 (Stage 7c): admin revokes a reviewer's status. Historical
+  // assignments stay intact; the user's role flips back to 'user'.
+  adminRevoke: (userId, reason) =>
+    api.post(`/reviewers/admin/${userId}/revoke`, { reason }),
 };
 
 export default reviewersAPI;

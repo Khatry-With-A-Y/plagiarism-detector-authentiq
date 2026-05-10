@@ -84,3 +84,35 @@ def require_admin(f):
             return jsonify({'error': 'Admin access required'}), 403
         return f(*args, **kwargs)
     return decorated_function
+
+
+def require_reviewer(f):
+    """Decorator to require reviewer role (reviewers and admins both pass)"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
+        if user.get('status') == 'blocked':
+            return jsonify({'error': 'Account is blocked'}), 401
+        if user['role'] not in ('reviewer', 'admin'):
+            return jsonify({'error': 'Reviewer access required'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def require_roles(*roles):
+    """Decorator factory to require one of the given roles"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            user = get_current_user()
+            if not user:
+                return jsonify({'error': 'Authentication required'}), 401
+            if user.get('status') == 'blocked':
+                return jsonify({'error': 'Account is blocked'}), 401
+            if user['role'] not in roles:
+                return jsonify({'error': f'Access requires one of: {", ".join(roles)}'}), 403
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator

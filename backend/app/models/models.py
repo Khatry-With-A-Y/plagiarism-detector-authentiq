@@ -462,6 +462,638 @@ class Submission:
         }
 
     @staticmethod
+    def assign_many(submission_id, count=None):
+        """
+        Assign `count` eligible reviewers to a submission's peer-review request.
+        Operates on submissions.review_votes JSON (v2 schema).
+
+        Algorithm (per plan §Domain Tagging & Expertise Matching):
+          1. Read submission: domain_tag, user_id, review_votes.
+          2. Build candidate pool: approved reviewers with matching expertise_tag,
+             excluding submitter, submitter's institution (unless STRICT_INSTITUTION_EXCLUSION=False),
+             admins, and anyone already in review_votes.
+          3. Order by active_assignments ASC, last assigned ASC, then RANDOM()
+             (or seeded hash when ASSIGNMENT_TEST_SEED is set).
+          4. Take top `count` rows; if fewer than MIN_REVIEWERS_PER_REQUEST available,
+             flip review_status to 'insufficient_pool'.
+          5. Append new assignment entries to review_votes JSON; set review_status='assigned'.
+        """
+        from ...config import (REVIEWERS_PER_REQUEST, MIN_REVIEWERS_PER_REQUEST,
+                               STRICT_INSTITUTION_EXCLUSION, REVIEW_DEADLINE_HOURS,
+                               ASSIGNMENT_TEST_SEED)
+        import random
+        from datetime import datetime, timezone, timedelta
+
+        if count is None:
+            count = REVIEWERS_PER_REQUEST
+
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+
+            # 1. Read submission
+            cursor.execute('''
+                SELECT s.id, s.user_id, s.domain_tag, s.review_votes, s.review_status,
+                       r.institution_domain as submitter_institution
+                FROM submissions s
+                LEFT JOIN reviewers r ON r.user_id = s.user_id
+                WHERE s.id = ?
+            ''', (submission_id,))
+            sub = cursor.fetchone()
+            if not sub:
+                raise ValueError('Submission not found')
+
+            sub = dict(sub)
+            existing_votes = json.loads(sub['review_votes'] or '[]')
+            already_assigned_ids = {e['reviewer_id'] for e in existing_votes}
+            submitter_id = sub['user_id']
+            submitter_institution = sub.get('submitter_institution') or ''
+            domain_tag = sub.get('domain_tag', 'CS')
+
+            # 2. Build candidate pool
+            # Get all approved reviewers with matching expertise tag
+            cursor.execute('''
+                SELECT r.user_id, r.institution_domain, r.expertise_tags,
+                       u.role, u.username,
+                       (SELECT COUNT(*) FROM submissions s2
+                        WHERE s2.review_status IN ('assigned','under_review')
+                          AND json_extract(s2.review_votes, '$') IS NOT NULL
+                          AND EXISTS (
+                              SELECT 1 FROM json_each(s2.review_votes) je
+                              WHERE json_extract(je.value, '$.reviewer_id') = r.user_id
+                                AND json_extract(je.value, '$.assignment_status') IN ('assigned','accepted')
+                          )
+                       ) as active_assignments,
+                       r.verified_at as last_assigned_at
+                FROM reviewers r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.application_status = 'approved'
+                  AND r.revoked_at IS NULL
+                  AND u.role = 'reviewer'
+                  AND u.status != 'blocked'
+            ''')
+            all_reviewers = [dict(row) for row in cursor.fetchall()]
+
+            candidates = []
+            conflict_ids = set()
+
+            # Block 7 (Stage 7b): exclusion-counter breakdown for the
+            # `insufficient_pool` diagnostic. Counts are mutually exclusive in
+            # *evaluation order* (submitter beats already_assigned beats
+            # expertise beats institution) — same priority as the filter
+            # chain, so the totals always sum to <total_active_reviewers>.
+            total_active_reviewers      = len(all_reviewers)
+            excluded_submitter          = 0
+            excluded_already_assigned   = 0
+            excluded_expertise_mismatch = 0
+            excluded_same_institution   = 0
+
+            for rev in all_reviewers:
+                uid = rev['user_id']
+                # Exclude submitter
+                if uid == submitter_id:
+                    excluded_submitter += 1
+                    continue
+                # Exclude already assigned (including previously declined)
+                if uid in already_assigned_ids:
+                    excluded_already_assigned += 1
+                    continue
+                # Expertise tag match (P0: all are 'CS', so this is a no-op filter)
+                tags = json.loads(rev['expertise_tags'] or '["CS"]')
+                if domain_tag not in tags:
+                    excluded_expertise_mismatch += 1
+                    continue
+                # Institution exclusion
+                same_inst = (rev['institution_domain'] and
+                             rev['institution_domain'].lower() == submitter_institution.lower())
+                if same_inst:
+                    if STRICT_INSTITUTION_EXCLUSION:
+                        excluded_same_institution += 1
+                        continue
+                    else:
+                        conflict_ids.add(uid)
+                candidates.append(rev)
+
+            # 3. Order: active_assignments ASC, last_assigned_at ASC NULLS FIRST, then random
+            if ASSIGNMENT_TEST_SEED:
+                seed_val = int(ASSIGNMENT_TEST_SEED)
+                rng = random.Random(seed_val)
+                candidates.sort(key=lambda r: (
+                    r['active_assignments'],
+                    r['last_assigned_at'] or '',
+                    rng.random()
+                ))
+            else:
+                random.shuffle(candidates)
+                candidates.sort(key=lambda r: (
+                    r['active_assignments'],
+                    r['last_assigned_at'] or ''
+                ))
+
+            selected = candidates[:count]
+
+            # 4. Quorum check
+            # Count active assignments that already exist on this submission
+            # (assigned/accepted/voted — exclude declined/expired). When we are
+            # backfilling (count < REVIEWERS_PER_REQUEST), a single new pick
+            # may be enough if the total active pool >= MIN_REVIEWERS_PER_REQUEST.
+            existing_active = sum(
+                1 for e in existing_votes
+                if e.get('assignment_status') in ('assigned', 'accepted', 'voted')
+            )
+            total_active_after = existing_active + len(selected)
+
+            if total_active_after < MIN_REVIEWERS_PER_REQUEST:
+                # Block 7 (Stage 7b): structured breakdown so the admin queue
+                # can explain *why* the pool was short instead of just
+                # surfacing the bare badge.
+                breakdown = {
+                    'eligible_count':              len(candidates),
+                    'excluded_submitter':          excluded_submitter,
+                    'excluded_same_institution':   excluded_same_institution,
+                    'excluded_already_assigned':   excluded_already_assigned,
+                    'excluded_expertise_mismatch': excluded_expertise_mismatch,
+                    'total_active_reviewers':      total_active_reviewers,
+                    'min_required':                MIN_REVIEWERS_PER_REQUEST,
+                    'existing_active':             existing_active,
+                }
+                cursor.execute(
+                    "UPDATE submissions "
+                    "SET review_status='insufficient_pool', pool_breakdown=? "
+                    "WHERE id=?",
+                    (json.dumps(breakdown), submission_id)
+                )
+                conn.commit()
+                return {
+                    'status':       'insufficient_pool',
+                    'assigned':     len(selected),
+                    'active_total': total_active_after,
+                    'breakdown':    breakdown,
+                }
+
+            # 5. Build new assignment entries and append to review_votes
+            now_utc = datetime.now(timezone.utc)
+            deadline_utc = now_utc + timedelta(hours=REVIEW_DEADLINE_HOURS)
+            now_str = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+            deadline_str = deadline_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            import uuid
+            new_entries = []
+            for rev in selected:
+                uid = rev['user_id']
+                entry = {
+                    'assignment_id':     str(uuid.uuid4()),
+                    'reviewer_id':       uid,
+                    'assignment_status': 'assigned',
+                    'assigned_at':       now_str,
+                    'deadline_at':       deadline_str,
+                    'completed_at':      None,
+                    'vote':              None,
+                    'comment':           None,
+                    'fail_reasons':      None,
+                    'decline_reason':    None,
+                    'conflict_flag':     1 if uid in conflict_ids else 0,
+                    'reviewer_snapshot': {
+                        'username':           rev.get('username'),
+                        'institution_domain': rev.get('institution_domain'),
+                    },
+                }
+                new_entries.append(entry)
+
+            updated_votes = existing_votes + new_entries
+            pass_count = sum(1 for e in updated_votes if e.get('vote') == 'pass')
+            fail_count = sum(1 for e in updated_votes if e.get('vote') == 'fail')
+
+            cursor.execute('''
+                UPDATE submissions
+                SET review_votes = ?,
+                    review_status = 'assigned',
+                    pass_votes = ?,
+                    fail_votes = ?,
+                    pool_breakdown = NULL
+                WHERE id = ?
+            ''', (json.dumps(updated_votes), pass_count, fail_count, submission_id))
+
+            conn.commit()
+            return {'status': 'assigned', 'assigned': len(new_entries)}
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def submit_vote(submission_id, reviewer_id, vote, comment=None, fail_reasons=None):
+        """
+        Submit a pass/fail vote for a reviewer's assignment.
+        Wrapped in BEGIN IMMEDIATE; re-reads live counts atomically.
+        Transitions review_status to 'awaiting_admin' when majority reached.
+        """
+        from ...config import (FAIL_REASON_TAXONOMY, FAIL_COMMENT_MIN_LEN,
+                               COMMENT_MAX_LEN, MIN_REVIEWERS_PER_REQUEST)
+        from datetime import datetime, timezone
+
+        if vote not in ('pass', 'fail'):
+            raise ValueError('vote must be pass or fail')
+
+        comment = (comment or '').strip()
+        if len(comment) > COMMENT_MAX_LEN:
+            raise ValueError(f'comment exceeds {COMMENT_MAX_LEN} characters')
+
+        if vote == 'fail':
+            if len(comment) < FAIL_COMMENT_MIN_LEN:
+                raise ValueError('COMMENT_REQUIRED_FOR_FAIL')
+            if not fail_reasons:
+                raise ValueError('COMMENT_REQUIRED_FOR_FAIL')
+            invalid = set(fail_reasons) - set(FAIL_REASON_TAXONOMY)
+            if invalid:
+                raise ValueError(f'Invalid fail_reasons: {invalid}')
+
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT s.review_votes, s.review_status,
+                       u.username, rv.institution_domain
+                FROM submissions s
+                JOIN users u ON u.id = ?
+                LEFT JOIN reviewers rv ON rv.user_id = ?
+                WHERE s.id = ?
+            ''', (reviewer_id, reviewer_id, submission_id))
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError('Submission not found')
+
+            row = dict(row)
+            if row['review_status'] not in ('assigned', 'under_review'):
+                raise ValueError('This submission is not currently under review')
+
+            votes = json.loads(row['review_votes'] or '[]')
+
+            # Find this reviewer's entry
+            entry_idx = None
+            for i, e in enumerate(votes):
+                if e.get('reviewer_id') == reviewer_id:
+                    entry_idx = i
+                    break
+
+            if entry_idx is None:
+                raise ValueError('No assignment found for this reviewer on this submission')
+
+            entry = votes[entry_idx]
+            if entry.get('assignment_status') == 'voted':
+                raise ValueError('Vote already submitted')
+
+            # Block 5: must accept the assignment before voting.
+            if entry.get('assignment_status') != 'accepted':
+                raise ValueError('MUST_ACCEPT_FIRST')
+
+            # Capture reviewer_snapshot at vote time
+            now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            reviewer_snapshot = {
+                'username':           row['username'],
+                'institution_domain': row['institution_domain'],
+            }
+
+            # Update the entry
+            entry['vote'] = vote
+            entry['comment'] = comment
+            entry['fail_reasons'] = fail_reasons
+            entry['assignment_status'] = 'voted'
+            entry['completed_at'] = now_utc
+            entry['reviewer_snapshot'] = reviewer_snapshot
+            votes[entry_idx] = entry
+
+            # Recompute live tallies
+            pass_count = sum(1 for e in votes if e.get('vote') == 'pass')
+            fail_count = sum(1 for e in votes if e.get('vote') == 'fail')
+            total_assigned = len([e for e in votes
+                                  if e.get('assignment_status') not in ('declined', 'expired')])
+
+            # Majority detection
+            majority_threshold = (total_assigned // 2) + 1
+            new_status = row['review_status']
+            review_outcome = None
+            if pass_count >= majority_threshold:
+                new_status = 'awaiting_admin'
+                review_outcome = 'pass'
+            elif fail_count >= majority_threshold:
+                new_status = 'awaiting_admin'
+                review_outcome = 'fail'
+            else:
+                new_status = 'under_review'
+
+            cursor.execute('''
+                UPDATE submissions
+                SET review_votes = ?,
+                    pass_votes = ?,
+                    fail_votes = ?,
+                    review_status = ?,
+                    review_outcome = ?
+                WHERE id = ?
+            ''', (json.dumps(votes), pass_count, fail_count,
+                  new_status, review_outcome, submission_id))
+
+            conn.commit()
+            return {
+                'vote': vote,
+                'pass_votes': pass_count,
+                'fail_votes': fail_count,
+                'review_status': new_status,
+                'review_outcome': review_outcome,
+            }
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_assignments_for_reviewer(reviewer_id, page=1, limit=50):
+        """Get all assignments (review_votes entries) for a specific reviewer across all submissions."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT s.id as submission_id, s.filename, s.domain_tag,
+                   s.review_status, s.review_votes,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', s.review_requested_at) as review_requested_at,
+                   u.username as submitter_name
+            FROM submissions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.review_votes IS NOT NULL
+              AND s.review_votes != '[]'
+              AND s.review_status IS NOT NULL
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+
+        assignments = []
+        for row in rows:
+            row = dict(row)
+            votes = json.loads(row['review_votes'] or '[]')
+            for entry in votes:
+                if entry.get('reviewer_id') == reviewer_id:
+                    assignments.append({
+                        'submission_id':    row['submission_id'],
+                        'filename':         row['filename'],
+                        'domain_tag':       row['domain_tag'],
+                        'review_status':    row['review_status'],
+                        'review_requested_at': row['review_requested_at'],
+                        **entry,
+                    })
+                    break
+
+        # Sort by assigned_at desc
+        assignments.sort(key=lambda a: a.get('assigned_at') or '', reverse=True)
+
+        total = len(assignments)
+        offset = (page - 1) * limit
+        return {
+            'assignments': assignments[offset:offset + limit],
+            'total': total,
+            'page': page,
+            'limit': limit,
+        }
+
+    @staticmethod
+    def get_assignment_detail(submission_id, reviewer_id):
+        """Get a single assignment entry for a reviewer on a specific submission."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT s.id as submission_id, s.filename, s.domain_tag,
+                   s.review_status, s.review_votes,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', s.review_requested_at) as review_requested_at
+            FROM submissions s
+            WHERE s.id = ?
+        ''', (submission_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        row = dict(row)
+        votes = json.loads(row['review_votes'] or '[]')
+        for entry in votes:
+            if entry.get('reviewer_id') == reviewer_id:
+                return {
+                    'submission_id':    row['submission_id'],
+                    'filename':         row['filename'],
+                    'domain_tag':       row['domain_tag'],
+                    'review_status':    row['review_status'],
+                    'review_requested_at': row['review_requested_at'],
+                    **entry,
+                }
+        return None
+
+    # ------------------------------------------------------------------
+    # Block 5 — Assignment Lifecycle: Accept / Decline / Expire + Backfill
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def accept_assignment(submission_id, reviewer_id):
+        """
+        Reviewer transitions their assignment from 'assigned' -> 'accepted'.
+        Rejects from any other state with a clear ValueError.
+        """
+        from datetime import datetime, timezone
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT review_votes, review_status FROM submissions WHERE id = ?',
+                (submission_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError('Submission not found')
+
+            row = dict(row)
+            votes = json.loads(row['review_votes'] or '[]')
+
+            entry_idx = None
+            for i, e in enumerate(votes):
+                if e.get('reviewer_id') == reviewer_id:
+                    entry_idx = i
+                    break
+            if entry_idx is None:
+                raise ValueError('No assignment found for this reviewer')
+
+            entry = votes[entry_idx]
+            current_status = entry.get('assignment_status')
+            if current_status == 'accepted':
+                # Idempotent — no-op
+                conn.commit()
+                return {'assignment_status': 'accepted', 'changed': False}
+            if current_status != 'assigned':
+                raise ValueError(
+                    f"Cannot accept from status '{current_status}'"
+                )
+
+            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            entry['assignment_status'] = 'accepted'
+            entry['accepted_at'] = now_str
+            votes[entry_idx] = entry
+
+            cursor.execute(
+                'UPDATE submissions SET review_votes = ? WHERE id = ?',
+                (json.dumps(votes), submission_id)
+            )
+            conn.commit()
+            return {'assignment_status': 'accepted', 'changed': True}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def decline_assignment(submission_id, reviewer_id, decline_reason=None):
+        """
+        Reviewer transitions their assignment 'assigned'|'accepted' -> 'declined',
+        captures an optional decline_reason (<= DECLINE_REASON_MAX_LEN), then
+        synchronously calls assign_many(submission_id, 1) to backfill the slot
+        from the remaining eligible pool.
+        """
+        from ...config import DECLINE_REASON_MAX_LEN
+        from datetime import datetime, timezone
+
+        if decline_reason is not None:
+            decline_reason = (decline_reason or '').strip()
+            if len(decline_reason) > DECLINE_REASON_MAX_LEN:
+                raise ValueError(
+                    f'decline_reason exceeds {DECLINE_REASON_MAX_LEN} characters'
+                )
+
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT review_votes, review_status FROM submissions WHERE id = ?',
+                (submission_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError('Submission not found')
+
+            row = dict(row)
+            votes = json.loads(row['review_votes'] or '[]')
+
+            entry_idx = None
+            for i, e in enumerate(votes):
+                if e.get('reviewer_id') == reviewer_id:
+                    entry_idx = i
+                    break
+            if entry_idx is None:
+                raise ValueError('No assignment found for this reviewer')
+
+            entry = votes[entry_idx]
+            current_status = entry.get('assignment_status')
+            if current_status not in ('assigned', 'accepted'):
+                raise ValueError(
+                    f"Cannot decline from status '{current_status}'"
+                )
+
+            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            entry['assignment_status'] = 'declined'
+            entry['declined_at'] = now_str
+            entry['decline_reason'] = decline_reason or None
+            votes[entry_idx] = entry
+
+            cursor.execute(
+                'UPDATE submissions SET review_votes = ? WHERE id = ?',
+                (json.dumps(votes), submission_id)
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        # Synchronously backfill from the remaining pool. assign_many opens its
+        # own connection and excludes anyone already in review_votes (including
+        # the just-declined reviewer), so duplicates are impossible.
+        backfill = Submission.assign_many(submission_id, count=1)
+        return {
+            'assignment_status': 'declined',
+            'backfill': backfill,
+        }
+
+    @staticmethod
+    def expire_overdue_assignments():
+        """
+        Lazy expiry sweep — idempotent. For every active assignment
+        (assignment_status IN ('assigned','accepted')) whose deadline_at has
+        passed, mark it 'expired' and synchronously backfill one replacement
+        for the same submission.
+
+        Returns a list of (submission_id, expired_count, backfill_result) for
+        each submission that had at least one expiry.
+        """
+        from datetime import datetime, timezone
+
+        now_str = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        # Phase 1: scan + mutate JSON inside one transaction.
+        conn = get_db_connection()
+        affected = []  # list of (submission_id, expired_count)
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, review_votes
+                FROM submissions
+                WHERE review_status IN ('assigned','under_review')
+                  AND review_votes IS NOT NULL
+                  AND review_votes != '[]'
+            ''')
+            rows = [dict(r) for r in cursor.fetchall()]
+
+            for row in rows:
+                votes = json.loads(row['review_votes'] or '[]')
+                changed = 0
+                for entry in votes:
+                    status = entry.get('assignment_status')
+                    deadline = entry.get('deadline_at')
+                    if status in ('assigned', 'accepted') and deadline and deadline <= now_str:
+                        entry['assignment_status'] = 'expired'
+                        entry['expired_at'] = now_str
+                        changed += 1
+                if changed:
+                    cursor.execute(
+                        'UPDATE submissions SET review_votes = ? WHERE id = ?',
+                        (json.dumps(votes), row['id'])
+                    )
+                    affected.append((row['id'], changed))
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        # Phase 2: trigger backfills outside the sweep transaction. Each call
+        # to assign_many opens its own BEGIN IMMEDIATE.
+        results = []
+        for submission_id, expired_count in affected:
+            try:
+                bf = Submission.assign_many(submission_id, count=expired_count)
+            except Exception as e:
+                bf = {'status': 'backfill_failed', 'error': str(e)}
+            results.append((submission_id, expired_count, bf))
+        return results
+
+    @staticmethod
     def delete(submission_id):
         """Delete a submission and its results"""
         conn = get_db_connection()
@@ -474,6 +1106,118 @@ class Submission:
         deleted = cursor.rowcount > 0
         conn.close()
         return deleted
+
+    # ------------------------------------------------------------------
+    # Admin Finalize + Promotion Pipeline
+    # ------------------------------------------------------------------
+    @staticmethod
+    def admin_decision(submission_id, admin_id, decision, reason=None,
+                       title=None, author=None, force=False):
+        """
+        Admin approves or rejects a peer-review request for a submission.
+
+        decision: 'approve' or 'reject'.
+        reason  : optional free-form audit note. REQUIRED when admin overrides
+                  before quorum (review_status not in awaiting_admin / under_review).
+        title   : (approve only) admin-supplied paper title for the new
+                  papers row.
+        author  : (approve only) admin-supplied author name.
+        force   : (approve only) bypass DUPLICATE_PAPER guard.
+
+        Returns dict:
+          - on approve: { decision, review_status='approved', paper_id,
+                          content_hash }
+          - on reject : { decision, review_status='rejected' }
+
+        Raises ValueError with one of:
+          'INVALID_DECISION'             — decision not in approve/reject
+          'SUBMISSION_NOT_FOUND'
+          'NO_REVIEW_REQUEST'            — submission has no review_status set
+          'ALREADY_DECIDED'              — already approved/rejected
+          'OVERRIDE_REASON_REQUIRED'     — overriding pre-quorum without reason
+          'DUPLICATE_PAPER'              — content_hash already in corpus (approve)
+          'NOT_ELIGIBLE_FOR_PROMOTION'   — submission has no content (approve)
+        """
+        if decision not in ('approve', 'reject'):
+            raise ValueError('INVALID_DECISION')
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+
+            # Validate state machine — done outside BEGIN IMMEDIATE so we can
+            # raise quickly on user errors without holding a write lock.
+            row = cursor.execute(
+                "SELECT review_status, review_outcome FROM submissions WHERE id = ?",
+                (submission_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError('SUBMISSION_NOT_FOUND')
+            current_status = row['review_status']
+            if current_status is None:
+                raise ValueError('NO_REVIEW_REQUEST')
+            if current_status in ('approved', 'rejected'):
+                raise ValueError('ALREADY_DECIDED')
+
+            # 'awaiting_admin' is the canonical post-quorum state. Anything
+            # else (pending / assigned / under_review / insufficient_pool)
+            # means admin is overriding before the panel reached majority,
+            # which the plan requires to carry an explicit reason.
+            is_pre_quorum_override = current_status != 'awaiting_admin'
+            if is_pre_quorum_override and not (reason and reason.strip()):
+                raise ValueError('OVERRIDE_REASON_REQUIRED')
+
+            # ---- APPROVE: run the Promotion Pipeline FIRST so that if it
+            # fails (e.g. duplicate), we never leave the submission in a
+            # half-approved state. ----
+            promotion_result = None
+            if decision == 'approve':
+                # Local import avoids circular import at module load time.
+                from ..utils.promotion import promote_submission
+                promotion_result = promote_submission(
+                    submission_id,
+                    title=title,
+                    author=author,
+                    force=force,
+                )
+
+            # ---- Persist the audit fields + final review_status. ----
+            new_status = 'approved' if decision == 'approve' else 'rejected'
+            try:
+                cursor.execute('BEGIN IMMEDIATE')
+                cursor.execute(
+                    '''
+                    UPDATE submissions
+                       SET review_status         = ?,
+                           admin_decision        = ?,
+                           admin_decided_by      = ?,
+                           admin_decided_at      = CURRENT_TIMESTAMP,
+                           admin_decision_reason = ?
+                     WHERE id = ?
+                    ''',
+                    (new_status, new_status, admin_id,
+                     (reason or None), submission_id),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+
+            response = {
+                'decision':        decision,
+                'review_status':   new_status,
+            }
+            if promotion_result is not None:
+                response.update({
+                    'paper_id':     promotion_result['paper_id'],
+                    'content_hash': promotion_result['content_hash'],
+                })
+            return response
+        finally:
+            conn.close()
 
 
 class SimilarityResult:

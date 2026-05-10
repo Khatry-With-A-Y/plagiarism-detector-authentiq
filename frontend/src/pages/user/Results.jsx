@@ -19,6 +19,9 @@ function Results({ id: propId, isEmbedded }) {
   const [requestLoading, setRequestLoading] = useState(false);
   const [requestSuccess, setRequestSuccess] = useState(false);
   const [requestError, setRequestError] = useState(null);
+  // Block 7 (Stage 7b): submitter post-decision panel — pseudonymous
+  // (`Reviewer 1..N` labels). Identity stays admin-only.
+  const [panelData, setPanelData] = useState(null);
 
   useEffect(() => {
     if (!submission) return;
@@ -46,6 +49,20 @@ function Results({ id: propId, isEmbedded }) {
     fetchEligibility();
     return () => { cancelled = true; };
   }, [id, submission?.id, submission?.status, submission?.review_status]);
+
+  // Block 7: pull pseudonymous panel feedback once a review has been
+  // requested. Refreshes whenever review_status / admin_decision changes.
+  useEffect(() => {
+    if (!submission?.review_status) {
+      setPanelData(null);
+      return;
+    }
+    let cancelled = false;
+    reviewsAPI.getSubmissionPanel(id)
+      .then(res => { if (!cancelled) setPanelData(res.data); })
+      .catch(() => { if (!cancelled) setPanelData(null); });
+    return () => { cancelled = true; };
+  }, [id, submission?.review_status, submission?.admin_decision]);
 
   const handleRequestReview = async () => {
     setRequestLoading(true);
@@ -323,6 +340,91 @@ function Results({ id: propId, isEmbedded }) {
                 {requestSuccess && (
                   <p style={{ color: '#16a34a', fontSize: '14px', marginTop: '12px', fontWeight: '500' }}>
                     Your request has been submitted. It will be assigned to a panel of expert reviewers shortly.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Block 7 (Stage 7b): submitter post-decision panel —
+                pseudonymous Reviewer 1..N labels; never exposes identity. */}
+            {panelData && (panelData.admin_decision || panelData.panel?.length > 0) && (
+              <div className="dashboard-reports" style={{
+                marginBottom: '24px',
+                padding: '24px',
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
+                    Reviewer Panel Feedback
+                  </h3>
+                  {panelData.admin_decision && (
+                    <span className={`dashboard-risk-badge ${
+                      panelData.admin_decision === 'approved' ? 'low' : 'critical'
+                    }`}>
+                      {panelData.admin_decision.charAt(0).toUpperCase() + panelData.admin_decision.slice(1)}
+                    </span>
+                  )}
+                </div>
+
+                {panelData.admin_decision_reason && (
+                  <div style={{
+                    background: '#fff',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    marginBottom: '14px',
+                    fontSize: '13px',
+                    color: '#374151',
+                  }}>
+                    <strong>Admin note:</strong> {panelData.admin_decision_reason}
+                  </div>
+                )}
+
+                {panelData.panel && panelData.panel.length > 0 ? (
+                  <>
+                    <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
+                      Reviewer identities are anonymous. Vote tally:{' '}
+                      <strong>{panelData.pass_votes}</strong> pass · <strong>{panelData.fail_votes}</strong> fail.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+                      {panelData.panel.map((p, idx) => (
+                        <div key={idx} style={{
+                          background: '#fff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          padding: '12px 14px',
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: 600, fontSize: '13px', color: '#1e293b' }}>
+                              {p.label}
+                            </span>
+                            <span className={`dashboard-risk-badge ${p.vote === 'pass' ? 'low' : 'high'}`} style={{ fontSize: '11px' }}>
+                              {p.vote ? p.vote.toUpperCase() : '—'}
+                            </span>
+                          </div>
+                          {p.comment && (
+                            <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.5, margin: '4px 0 0' }}>
+                              {p.comment}
+                            </p>
+                          )}
+                          {p.fail_reasons?.length > 0 && (
+                            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {p.fail_reasons.map(fr => (
+                                <span key={fr} className="dashboard-risk-badge high" style={{ fontSize: '10px' }}>
+                                  {fr.replace(/_/g, ' ')}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p style={{ fontSize: '13px', color: '#64748b' }}>
+                    Reviewers have not voted yet. Feedback will appear here once the panel completes.
                   </p>
                 )}
               </div>

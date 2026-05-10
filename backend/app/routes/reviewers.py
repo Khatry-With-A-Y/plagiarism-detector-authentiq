@@ -124,3 +124,58 @@ def decide_application(target_user_id):
         return jsonify({'message': f'Application {decision}'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@reviewers_bp.route('/admin/<int:target_user_id>/revoke', methods=['POST'])
+@require_admin
+def revoke_reviewer(target_user_id):
+    """Block 7 (Stage 7c): admin revokes a reviewer's status.
+
+    Effect, all in a single transaction:
+      - reviewers.revoked_at = now
+      - reviewers.revoked_by = admin id
+      - reviewers.revoke_reason = optional reason
+      - reviewers.application_status = 'rejected'
+      - users.role = 'user'
+
+    Historical `review_votes` JSON entries are NOT touched — the embedded
+    `reviewer_snapshot` (captured at assignment time) preserves the audit
+    trail even though the user's role has changed.
+    """
+    admin = get_current_user()
+    data = request.get_json(silent=True) or {}
+    reason = data.get('reason')
+
+    # Don't let an admin revoke themselves accidentally.
+    if target_user_id == admin['id']:
+        return jsonify({'error': 'You cannot revoke your own reviewer status.'}), 400
+
+    target = Reviewer.get_by_user_id(target_user_id)
+    if not target:
+        return jsonify({'error': 'Reviewer not found'}), 404
+    if target.get('revoked_at'):
+        return jsonify({'error': 'Reviewer is already revoked.'}), 409
+    if target.get('application_status') != 'approved':
+        return jsonify({
+            'error': 'Only approved reviewers can be revoked.'
+        }), 400
+
+    try:
+        Reviewer.revoke(target_user_id, admin['id'], reason)
+        Notification.create(
+            target_user_id,
+            'Reviewer Status Revoked',
+            (
+                'Your reviewer privileges have been revoked by an administrator.'
+                + (f' Reason: {reason}' if reason else '')
+            ),
+            'warning',
+        )
+        return jsonify({
+            'message':       'Reviewer status revoked.',
+            'user_id':       target_user_id,
+            'revoked_by':    admin['id'],
+            'revoke_reason': reason,
+        }), 200
+    except Exception as e:
+        return jsonify({'error': f'Revoke failed: {str(e)}'}), 500

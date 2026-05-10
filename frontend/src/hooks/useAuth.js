@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { register as apiRegister, login as apiLogin, getCurrentUser as apiGetCurrentUser } from '../api/auth';
 import {
+  getAuthToken,
   setAuthToken,
   setUser as storeUser,
   getUser as getStoredUser,
@@ -18,6 +19,25 @@ export default function useAuth() {
     if (stored && JSON.stringify(stored) !== JSON.stringify(user)) {
       setUser(stored);
     }
+    // refresh current user from backend to capture role/status changes made server-side
+    if (!getAuthToken()) return;
+
+    let cancelled = false;
+    apiGetCurrentUser()
+      .then((res) => {
+        const userData = res.data;
+        if (!cancelled && JSON.stringify(userData) !== JSON.stringify(stored)) {
+          storeUser(userData);
+          setUser(userData);
+        }
+      })
+      .catch(() => {
+        // best effort; keep current local state on transient failures
+      });
+
+    return () => {
+      cancelled = true;
+    };
     // we intentionally run this only once; further updates go through login/logout
   }, []);
 

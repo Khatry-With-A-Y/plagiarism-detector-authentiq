@@ -1,0 +1,9 @@
+This is a seeded student submission that intentionally has low similarity
+against the demo corpus document. It exists to drive the peer-review
+workflow end-to-end: the user requests review, the admin assigns five
+reviewers, the reviewers accept and vote, the admin promotes the paper, and
+on the next similarity check the corpus contains the new document.
+
+The text below is intentionally distinct from the seeded corpus so the
+detector reports a low-similarity score, which is what makes the submission
+review-eligible (the threshold is REVIEW_ELIGIBILITY_THRESHOLD in config).

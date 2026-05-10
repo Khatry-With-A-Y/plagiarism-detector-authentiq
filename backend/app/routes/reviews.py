@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
-from ..models.models import Submission, User
-from ..utils.auth import require_auth, require_admin, get_current_user
+from ..models.models import Submission, User, SimilarityResult
+from ..utils.auth import require_auth, require_admin, require_reviewer, get_current_user
+from ..utils.serializers import serialize_assignment, serialize_assignment_list
 from datetime import datetime
 
 reviews_bp = Blueprint('reviews', __name__)
@@ -77,9 +78,537 @@ def create_request():
 @require_admin
 def get_admin_queue():
     """Get the peer review queue for admin"""
+    # Block 5: lazy-expire overdue assignments before serving the queue so
+    # admins always see fresh attrition state and any auto-backfilled rows.
+    try:
+        Submission.expire_overdue_assignments()
+    except Exception:
+        # Sweep failure must not break the queue read.
+        pass
+
     status = request.args.get('status')
     page = int(request.args.get('page', 1))
     limit = int(request.args.get('limit', 50))
-    
+
     queue_data = Submission.get_admin_review_queue(status, page, limit)
+
+    # Block 7 (Stage 7b): parse pool_breakdown JSON server-side so the admin
+    # queue UI doesn't have to deal with the raw string.
+    import json as _json
+    for row in queue_data.get('requests', []):
+        raw = row.get('pool_breakdown')
+        if isinstance(raw, str) and raw:
+            try:
+                row['pool_breakdown'] = _json.loads(raw)
+            except Exception:
+                row['pool_breakdown'] = None
+
     return jsonify(queue_data), 200
+
+
+# ---------------------------------------------------------------------------
+# Block 4 — Assignment, Voting, Majority & Double-Blind
+# ---------------------------------------------------------------------------
+
+@reviews_bp.route('/admin/submissions/<int:submission_id>/assign', methods=['POST'])
+@require_admin
+def assign_reviewers(submission_id):
+    """Admin triggers reviewer assignment for a pending review request."""
+    submission = Submission.get_by_id(submission_id)
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+    if submission.get('review_status') not in ('pending', 'insufficient_pool'):
+        return jsonify({'error': 'Submission is not in a state that allows assignment'}), 400
+
+    try:
+        result = Submission.assign_many(submission_id)
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Assignment failed: {str(e)}'}), 500
+
+
+@reviews_bp.route('/assignments', methods=['GET'])
+@require_reviewer
+def list_assignments():
+    """Reviewer: list own assignments. Admin: list all (admin sees full data).
+
+    Block 7 (Stage 7a): accepts an optional `?status=` query param with one of
+    `pending` (assigned|accepted), `completed` (voted), or `declined_expired`
+    (declined|expired). Unknown values are ignored (no filter applied).
+    """
+    user = get_current_user()
+    page = int(request.args.get('page', 1))
+    limit = min(int(request.args.get('page_size', 50)), 100)
+    status_filter = request.args.get('status')
+
+    # Block 5: lazy-expire overdue assignments before listing, so the reviewer
+    # never sees a stale 'assigned/accepted' row past its deadline. Backfill
+    # is triggered transparently inside the sweep.
+    try:
+        Submission.expire_overdue_assignments()
+    except Exception:
+        pass
+
+    # Pull a generous page first, then filter in Python — keeps the SQL simple
+    # while still giving stable pagination on the client side. Reviewer rosters
+    # are O(few hundred) at most, so the in-memory filter is fine.
+    data = Submission.get_assignments_for_reviewer(user['id'], page=1, limit=1000)
+
+    status_buckets = {
+        'pending':           ('assigned', 'accepted'),
+        'completed':         ('voted',),
+        'declined_expired':  ('declined', 'expired'),
+    }
+    if status_filter in status_buckets:
+        bucket = status_buckets[status_filter]
+        filtered = [
+            a for a in data['assignments']
+            if (a.get('assignment_status') or '') in bucket
+        ]
+    else:
+        filtered = data['assignments']
+
+    total = len(filtered)
+    offset = (page - 1) * limit
+    page_slice = filtered[offset:offset + limit]
+
+    # Redact through serializer — reviewer sees only their own entry (already filtered by model)
+    serialized = []
+    for a in page_slice:
+        entry = {k: v for k, v in a.items() if k not in (
+            'submission_id', 'filename', 'domain_tag', 'review_status', 'review_requested_at'
+        )}
+        safe = serialize_assignment(entry, 'reviewer')
+        safe['submission_id'] = a['submission_id']
+        safe['filename'] = a['filename']
+        safe['domain_tag'] = a['domain_tag']
+        safe['review_status'] = a['review_status']
+        safe['review_requested_at'] = a['review_requested_at']
+        serialized.append(safe)
+
+    return jsonify({
+        'assignments': serialized,
+        'total': total,
+        'page': page,
+        'limit': limit,
+        'status_filter': status_filter if status_filter in status_buckets else None,
+    }), 200
+
+
+@reviews_bp.route('/assignments/<int:submission_id>', methods=['GET'])
+@require_reviewer
+def get_assignment_detail(submission_id):
+    """Reviewer: get their assignment detail for a submission (includes top matches)."""
+    user = get_current_user()
+
+    detail = Submission.get_assignment_detail(submission_id, user['id'])
+    if not detail:
+        return jsonify({'error': 'Assignment not found or access denied'}), 403
+
+    # Redact the assignment entry
+    entry = {k: v for k, v in detail.items() if k not in (
+        'submission_id', 'filename', 'domain_tag', 'review_status', 'review_requested_at'
+    )}
+    safe = serialize_assignment(entry, 'reviewer')
+    safe['submission_id'] = detail['submission_id']
+    safe['filename'] = detail['filename']
+    safe['domain_tag'] = detail['domain_tag']
+    safe['review_status'] = detail['review_status']
+    safe['review_requested_at'] = detail['review_requested_at']
+
+    # Attach top similarity matches so reviewer can evaluate the submission
+    results = SimilarityResult.get_by_submission(submission_id)
+    top_matches = []
+    for r in results[:10]:
+        match_details = {}
+        if r.get('match_details'):
+            import json as _json
+            try:
+                match_details = _json.loads(r['match_details'])
+            except Exception:
+                pass
+        top_matches.append({
+            'paper_id':         r['paper_id'],
+            'title':            r.get('title', ''),
+            'author':           r.get('author', ''),
+            'similarity_score': r['similarity_score'],
+            'highest_match':    match_details.get('highest_match_score', 0),
+        })
+
+    # Attach submission text (for reviewer to read)
+    submission = Submission.get_by_id(submission_id)
+    safe['submission_text'] = submission.get('content_text', '') if submission else ''
+    safe['top_matches'] = top_matches
+
+    return jsonify(safe), 200
+
+
+@reviews_bp.route('/assignments/<int:submission_id>/vote', methods=['POST'])
+@require_reviewer
+def submit_vote(submission_id):
+    """Reviewer submits a pass/fail vote with comment and optional fail_reasons."""
+    user = get_current_user()
+    data = request.get_json() or {}
+
+    vote = data.get('vote')
+    comment = data.get('comment', '')
+    fail_reasons = data.get('fail_reasons')
+
+    if not vote:
+        return jsonify({'error': 'vote is required'}), 400
+
+    try:
+        result = Submission.submit_vote(submission_id, user['id'], vote, comment, fail_reasons)
+        return jsonify(result), 200
+    except ValueError as e:
+        error_str = str(e)
+        if error_str == 'COMMENT_REQUIRED_FOR_FAIL':
+            return jsonify({
+                'error': 'A comment (≥20 chars) and at least one fail_reason are required for a fail vote',
+                'code': 'COMMENT_REQUIRED_FOR_FAIL'
+            }), 400
+        if error_str == 'MUST_ACCEPT_FIRST':
+            return jsonify({
+                'error': 'You must accept this assignment before voting.',
+                'code': 'MUST_ACCEPT_FIRST'
+            }), 400
+        return jsonify({'error': error_str}), 400
+    except Exception as e:
+        return jsonify({'error': f'Vote submission failed: {str(e)}'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Block 5 — Assignment Lifecycle: Accept / Decline / Expire + Backfill
+# ---------------------------------------------------------------------------
+
+@reviews_bp.route('/assignments/<int:submission_id>/accept', methods=['POST'])
+@require_reviewer
+def accept_assignment(submission_id):
+    """Reviewer accepts an assigned review (assigned -> accepted)."""
+    user = get_current_user()
+    try:
+        result = Submission.accept_assignment(submission_id, user['id'])
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Accept failed: {str(e)}'}), 500
+
+
+@reviews_bp.route('/assignments/<int:submission_id>/decline', methods=['POST'])
+@require_reviewer
+def decline_assignment(submission_id):
+    """
+    Reviewer declines an assignment ('assigned' or 'accepted' -> 'declined').
+    Optional body: { decline_reason: str (<=500 chars) }.
+    Backfill is performed synchronously from the remaining eligible pool.
+    """
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    decline_reason = data.get('decline_reason')
+
+    try:
+        result = Submission.decline_assignment(submission_id, user['id'], decline_reason)
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Decline failed: {str(e)}'}), 500
+
+
+@reviews_bp.route('/submissions/<int:submission_id>/panel', methods=['GET'])
+@require_auth
+def get_submission_panel(submission_id):
+    """Submitter post-decision view (Block 7, Stage 7c).
+
+    Returns pseudonymous panel feedback (`Reviewer 1..N` labels) for the
+    owner of the submission. Voter identity is *never* exposed — the
+    `serializers.serialize_assignment_list(.., 'owner')` redactor strips
+    `reviewer_id` and `reviewer_snapshot`.
+
+    Only available once an admin decision has been recorded (or the panel
+    has reached `awaiting_admin`); for in-flight reviews the submitter
+    sees an empty panel.
+    """
+    user = get_current_user()
+    submission = Submission.get_by_id(submission_id)
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+    if submission['user_id'] != user['id'] and user['role'] != 'admin':
+        return jsonify({'error': 'Access denied'}), 403
+
+    import json as _json
+    try:
+        votes = _json.loads(submission.get('review_votes') or '[]')
+    except Exception:
+        votes = []
+
+    # Owner-redacted view: pseudonymous, no identity, only voted entries.
+    panel = serialize_assignment_list(votes, 'owner')
+
+    return jsonify({
+        'submission_id':       submission['id'],
+        'filename':            submission['filename'],
+        'review_status':       submission.get('review_status'),
+        'review_outcome':      submission.get('review_outcome'),
+        'pass_votes':          submission.get('pass_votes', 0),
+        'fail_votes':          submission.get('fail_votes', 0),
+        'review_requested_at': submission.get('review_requested_at'),
+        'admin_decision':      submission.get('admin_decision'),
+        'admin_decided_at':    submission.get('admin_decided_at'),
+        # Surface admin reason only when the decision is final, so submitter
+        # sees the rationale they were given.
+        'admin_decision_reason': submission.get('admin_decision_reason')
+                                 if submission.get('admin_decision')
+                                 else None,
+        'panel':               panel,
+    }), 200
+
+
+@reviews_bp.route('/admin/submissions/<int:submission_id>', methods=['GET'])
+@require_admin
+def get_admin_submission_detail(submission_id):
+    """Admin: get full review detail for a submission including all reviewer votes."""
+    # Block 5: lazy-expire overdue assignments before reading detail.
+    try:
+        Submission.expire_overdue_assignments()
+    except Exception:
+        pass
+
+    submission = Submission.get_by_id(submission_id)
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+
+    import json as _json
+    votes_raw = submission.get('review_votes') or '[]'
+    try:
+        votes = _json.loads(votes_raw)
+    except Exception:
+        votes = []
+
+    # Admin sees all entries with full data
+    serialized_votes = serialize_assignment_list(votes, 'admin')
+
+    results = SimilarityResult.get_by_submission(submission_id)
+    top_matches = []
+    for r in results[:10]:
+        match_details = {}
+        if r.get('match_details'):
+            try:
+                match_details = _json.loads(r['match_details'])
+            except Exception:
+                pass
+        top_matches.append({
+            'paper_id':         r['paper_id'],
+            'title':            r.get('title', ''),
+            'author':           r.get('author', ''),
+            'similarity_score': r['similarity_score'],
+            'highest_match':    match_details.get('highest_match_score', 0),
+        })
+
+    # Block 7: surface the pool_breakdown so the admin queue can explain
+    # *why* a submission flipped to insufficient_pool.
+    pool_breakdown = None
+    if submission.get('pool_breakdown'):
+        try:
+            pool_breakdown = _json.loads(submission['pool_breakdown'])
+        except Exception:
+            pool_breakdown = None
+
+    return jsonify({
+        'submission_id':       submission['id'],
+        'filename':            submission['filename'],
+        'domain_tag':          submission.get('domain_tag', 'CS'),
+        'review_status':       submission.get('review_status'),
+        'review_outcome':      submission.get('review_outcome'),
+        'pass_votes':          submission.get('pass_votes', 0),
+        'fail_votes':          submission.get('fail_votes', 0),
+        'review_requested_at': submission.get('review_requested_at'),
+        'admin_decision':      submission.get('admin_decision'),
+        'admin_decided_at':    submission.get('admin_decided_at'),
+        'admin_decision_reason': submission.get('admin_decision_reason'),
+        'assignments':         serialized_votes,
+        'top_matches':         top_matches,
+        'pool_breakdown':      pool_breakdown,
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Admin Finalize + Promotion Pipeline
+# ---------------------------------------------------------------------------
+
+@reviews_bp.route('/admin/submissions/<int:submission_id>/decision', methods=['POST'])
+@require_admin
+def admin_decide_submission(submission_id):
+    """Admin approves or rejects a peer-review request for a submission.
+
+    Body: { decision: 'approve' | 'reject',
+            reason?:  str,
+            title?:   str,    # approve-only: title for new papers row
+            author?:  str,    # approve-only: author for new papers row
+            force?:   bool }  # approve-only: bypass DUPLICATE_PAPER guard
+
+    On approve, runs the deterministic Promotion Pipeline (file copy +
+    INSERT INTO papers + in-process corpus-cache invalidate) so the next
+    similarity request picks up the freshly-promoted paper.
+    """
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+
+    decision = data.get('decision')
+    reason   = data.get('reason')
+    title    = data.get('title')
+    author   = data.get('author')
+    force    = bool(data.get('force', False))
+
+    try:
+        result = Submission.admin_decision(
+            submission_id,
+            user['id'],
+            decision,
+            reason=reason,
+            title=title,
+            author=author,
+            force=force,
+        )
+        return jsonify(result), 200
+    except ValueError as e:
+        code = str(e)
+        # Map well-known sentinels to clear HTTP responses.
+        msg_for = {
+            'INVALID_DECISION':           ("decision must be 'approve' or 'reject'.", 400),
+            'SUBMISSION_NOT_FOUND':       ('Submission not found.', 404),
+            'NO_REVIEW_REQUEST':          ('This submission has no peer-review request.', 400),
+            'ALREADY_DECIDED':            ('This request has already been decided.', 409),
+            'OVERRIDE_REASON_REQUIRED':   ("A reason is required when overriding a request before the panel reaches quorum.", 400),
+            'DUPLICATE_PAPER':            ('A paper with identical content already exists in the corpus. Pass force=true to override.', 409),
+            'NOT_ELIGIBLE_FOR_PROMOTION': ('Submission has no content to promote.', 400),
+            'SOURCE_FILE_MISSING':        ('Submission file is missing on disk; cannot copy to corpus.', 500),
+        }
+        if code in msg_for:
+            text, http_code = msg_for[code]
+            return jsonify({'error': text, 'code': code}), http_code
+        return jsonify({'error': code, 'code': code}), 400
+    except Exception as e:
+        return jsonify({'error': f'Decision failed: {str(e)}'}), 500
+
+
+@reviews_bp.route('/assignments/summary', methods=['GET'])
+@require_reviewer
+def get_assignments_summary():
+    """Reviewer: summary counts for navbar badge."""
+    # Block 5: keep the badge accurate by sweeping overdue rows first.
+    try:
+        Submission.expire_overdue_assignments()
+    except Exception:
+        pass
+
+    user = get_current_user()
+    data = Submission.get_assignments_for_reviewer(user['id'], page=1, limit=1000)
+    assignments = data['assignments']
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    assigned_count = sum(1 for a in assignments if a.get('assignment_status') == 'assigned')
+    accepted_count = sum(1 for a in assignments if a.get('assignment_status') == 'accepted')
+    completed_count = sum(1 for a in assignments if a.get('assignment_status') == 'voted')
+    declined_or_expired_count = sum(
+        1 for a in assignments if a.get('assignment_status') in ('declined', 'expired')
+    )
+    nearing_deadline_count = sum(
+        1 for a in assignments
+        if a.get('assignment_status') in ('assigned', 'accepted')
+        and a.get('deadline_at') and a['deadline_at'] > now
+        # within 12 hours
+        and (datetime.fromisoformat(a['deadline_at'].replace('Z', '+00:00')) -
+             datetime.now(timezone.utc)).total_seconds() < 12 * 3600
+    )
+
+    return jsonify({
+        'assigned_count':           assigned_count,
+        'accepted_count':           accepted_count,
+        'nearing_deadline_count':   nearing_deadline_count,
+        'completed_count':          completed_count,
+        'declined_or_expired_count': declined_or_expired_count,
+    }), 200
+
+
+@reviews_bp.route('/admin/requests/summary', methods=['GET'])
+@require_admin
+def get_admin_requests_summary():
+    """Admin: summary counts for the navbar badge.
+
+    Returns review-pipeline state at a glance:
+      - pending_count:        review_status='pending' (waiting for assignment)
+      - assigned_count:       review_status IN ('assigned','under_review')
+      - awaiting_admin_count: panel reached quorum, awaiting admin decide
+      - insufficient_pool_count: not enough eligible reviewers
+      - nearing_deadline_count: assignments with deadline_at within 12h that
+                                are still 'assigned' or 'accepted'
+
+    The admin badge goes amber if `awaiting_admin_count > 0` OR
+    `nearing_deadline_count > 0` (frontend chooses).
+    """
+    # Sweep overdue first so counts reflect the post-expiry state.
+    try:
+        Submission.expire_overdue_assignments()
+    except Exception:
+        pass
+
+    from ..models.models import get_db_connection
+    from datetime import datetime, timezone, timedelta
+    import json as _json
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT review_status, review_votes
+            FROM submissions
+            WHERE review_status IS NOT NULL
+        ''')
+        rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    pending_count = sum(1 for r in rows if r['review_status'] == 'pending')
+    assigned_count = sum(
+        1 for r in rows if r['review_status'] in ('assigned', 'under_review')
+    )
+    awaiting_admin_count = sum(
+        1 for r in rows if r['review_status'] == 'awaiting_admin'
+    )
+    insufficient_pool_count = sum(
+        1 for r in rows if r['review_status'] == 'insufficient_pool'
+    )
+
+    # Count active assignments whose deadline is within the next 12h.
+    cutoff = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime(
+        '%Y-%m-%dT%H:%M:%SZ'
+    )
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    nearing_deadline_count = 0
+    for r in rows:
+        if r['review_status'] not in ('assigned', 'under_review'):
+            continue
+        try:
+            votes = _json.loads(r['review_votes'] or '[]')
+        except Exception:
+            continue
+        for v in votes:
+            if v.get('assignment_status') not in ('assigned', 'accepted'):
+                continue
+            d = v.get('deadline_at')
+            if d and now < d <= cutoff:
+                nearing_deadline_count += 1
+
+    return jsonify({
+        'pending_count':           pending_count,
+        'assigned_count':          assigned_count,
+        'awaiting_admin_count':    awaiting_admin_count,
+        'insufficient_pool_count': insufficient_pool_count,
+        'nearing_deadline_count':  nearing_deadline_count,
+    }), 200

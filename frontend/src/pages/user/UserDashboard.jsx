@@ -5,7 +5,9 @@ import { notificationsAPI } from '../../api/notifications';
 import useAuth from '../../hooks/useAuth';
 import Results from './Results';
 import UserStatistics from './UserStatistics';
+import ReviewBadge from '../../components/ReviewBadge';
 import ApplyReviewer from '../reviewer/ApplyReviewer';
+import ReviewerDashboard from '../reviewer/ReviewerDashboard';
 import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
 import '../dashboard.css';
 
@@ -42,6 +44,7 @@ function UserDashboard() {
   const notificationsRef = useRef(null);
   const userMenuRef = useRef(null);
   const navigate = useNavigate();
+  const REVIEWER_WORK_TAB_ID = 'reviewer-work';
 
   const checkScrollability = () => {
     if (navTabsContainerRef.current) {
@@ -258,23 +261,36 @@ function UserDashboard() {
     navigate('/login');
   };
 
-  const handleViewReport = (submission) => {
-    const exists = openTabs.find(tab => tab.id === submission.id);
-    if (!exists) {
-      setOpenTabs([...openTabs, { id: submission.id, name: submission.filename }]);
-    }
-    setActiveTab(submission.id);
+  const focusNavbarTab = (tabId) => {
     // Scroll the tab into view after DOM updates
     setTimeout(() => {
       const container = navTabsContainerRef.current;
       if (container) {
-        const tabElement = container.querySelector(`[data-tab-id="${submission.id}"]`);
+        const tabElement = container.querySelector(`[data-tab-id="${tabId}"]`);
         if (tabElement) {
           tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
           setTimeout(checkScrollability, 300);
         }
       }
     }, 50);
+  };
+
+  const openNavbarTab = (tabId, tabName) => {
+    setOpenTabs(prevTabs => {
+      const exists = prevTabs.find(tab => tab.id === tabId);
+      if (exists) return prevTabs;
+      return [...prevTabs, { id: tabId, name: tabName }];
+    });
+    setActiveTab(tabId);
+    focusNavbarTab(tabId);
+  };
+
+  const handleViewReport = (submission) => {
+    openNavbarTab(submission.id, submission.filename);
+  };
+
+  const handleOpenReviewerWorkTab = () => {
+    setActiveTab(REVIEWER_WORK_TAB_ID);
   };
 
   const closeTab = (e, tabId) => {
@@ -423,18 +439,29 @@ function UserDashboard() {
                 </svg>
                 Dashboard
               </button>
-              <button
-                className={`dashboard-nav-link ${activeTab === 'statistics' ? 'active' : ''}`}
-                onClick={() => setActiveTab('statistics')}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="20" x2="18" y2="10"/>
-                  <line x1="12" y1="20" x2="12" y2="4"/>
-                  <line x1="6" y1="20" x2="6" y2="14"/>
-                </svg>
-                My Statistics
-              </button>
+              {user?.role === 'reviewer' && (
+                <ReviewBadge
+                  variant="reviewer"
+                  mode="nav"
+                  alwaysVisible={true}
+                  onClick={handleOpenReviewerWorkTab}
+                  isActive={activeTab === REVIEWER_WORK_TAB_ID}
+                />
+              )}
+              {['user', 'reviewer'].includes(user?.role) && (
+                <button
+                  className={`dashboard-nav-link ${activeTab === 'statistics' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('statistics')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="20" x2="18" y2="10"/>
+                    <line x1="12" y1="20" x2="12" y2="4"/>
+                    <line x1="6" y1="20" x2="6" y2="14"/>
+                  </svg>
+                  My Statistics
+                </button>
+              )}
               {showReviewerApp && (
                 <div
                   className={`dashboard-nav-link ${activeTab === 'reviewer-apply' ? 'active' : ''}`}
@@ -665,6 +692,8 @@ function UserDashboard() {
             setActiveTab('dashboard');
           }} 
         />
+      ) : activeTab === REVIEWER_WORK_TAB_ID ? (
+        <ReviewerDashboard />
       ) : activeTab !== 'dashboard' ? (
         <Results id={activeTab} isEmbedded={true} />
       ) : (

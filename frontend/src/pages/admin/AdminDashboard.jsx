@@ -6,6 +6,7 @@ import CorpusManagement from './CorpusManagement';
 import UserManagement from './UserManagement';
 import ReviewerApplications from './ReviewerApplications';
 import ReviewQueue from './ReviewQueue';
+import ReviewBadge from '../../components/ReviewBadge';
 import '../dashboard.css';
 import './adminStatistics.css';
 
@@ -237,6 +238,8 @@ function AdminDashboard() {
           </div>
         </div>
         <div className="dashboard-navbar-right">
+          {/* Block 7: peer-review queue badge — amber when an action is pending. */}
+          <ReviewBadge variant="admin" />
           <button className="dashboard-icon-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>

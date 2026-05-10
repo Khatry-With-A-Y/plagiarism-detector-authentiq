@@ -1,176 +1,227 @@
-# Authentiq: An N-Gram Enhanced Plagiarism Detection System for Academic Papers
+# Authentiq
 
-Authentiq is a full-stack web application for detecting plagiarism in academic papers. It uses TF-IDF (Term Frequency-Inverse Document Frequency) algorithm combined with cosine similarity to compare submitted documents against a corpus of academic papers.
+> An n-gram + TF-IDF plagiarism-detection platform with a built-in **double-blind peer-review pipeline** that promotes accepted submissions back into the corpus.
 
-## Features
-
-- **File Upload Support**: Accepts .pdf, .doc, and .docx files
-- **TF-IDF Analysis**: Uses advanced text processing and TF-IDF vectorization
-- **Cosine Similarity**: Calculates similarity scores between documents
-- **Submission Management**: Track and manage your document submissions
-- **Results Display**: View ranked similarity results with detailed information
-- **Admin Panel**: Manage the academic paper corpus (admin users)
-- **Corpus Management**: Add papers to the corpus for comparison
-
-## Technology Stack
-
-### Backend
-- **Python 3.x**
-- **Flask** - Web framework
-- **SQLite** - Database
-- **PyJWT** - JWT authentication
-- **python-docx** - DOCX file processing
-- **PyMuPDF** - PDF file processing
-- **python-docx2txt** - DOC file processing
-
-### Frontend
-- **React 18** - UI framework
-- **React Router** - Routing
-
-## Installation & Setup
-
-### ⚠️ Important Note for Team Members
-**DO NOT use `npm install`** for this project. Always use `npm ci` instead. This ensures everyone has the exact same dependency versions from `package-lock.json`, preventing "works on my machine" issues.
-
-### Quick Setup (Automated - Recommended)
-
-**Windows:**
-```bash
-setup.ps1
-```
-#### What the Setup Scripts Do:
-- Check if backend/frontend servers are running and warn you
-- Skip steps that are already done (venv, dependencies)
-- Ask before reinitializing the database if it exists
-- Install all dependencies automatically
-- Download the corpus PDFs from GitHub (~1.2 GB, skipped if already present)
-- Initialize the database (or prompt before reinitializing)
-- **Automatically ingest the corpus into the database** (populates papers for plagiarism comparison)
-- Print clear instructions for starting servers
-
-**Safe to run multiple times!** The scripts are idempotent and won't overwrite existing data.
-
-Then follow the printed instructions to start the servers.
+Authentiq is a final-year-project full-stack web application. The detector
+side is classical (TF-IDF over character/word n-grams + cosine similarity
+over a precomputed corpus index). The peer-review side is the novel
+contribution: when a low-similarity submission is flagged as a candidate
+for the corpus, the platform runs it through a 5-reviewer panel with
+72-hour deadlines, double-blind voting, and an admin-finalize promotion
+pipeline. Approved submissions are added to the corpus with provenance
+tags so the next similarity check picks them up.
 
 ---
 
-### Manual Setup
+## Highlights
 
-#### Backend Setup
+- **Plagiarism detection** — n-gram TF-IDF + cosine similarity, sentence-level
+  evidence, automatic reference-section exclusion (so bibliographies don't
+  inflate scores).
+- **Peer-review pipeline** — 5-reviewer panel, 72h deadline, accept /
+  decline / lazy-expiry, automatic backfill, double-blind, anti-collusion
+  filters (submitter / same-institution / already-assigned / expertise
+  mismatch).
+- **Admin finalize + Promotion Pipeline** — deterministic 6-step pipeline
+  copies an approved submission into the corpus with `source='peer_reviewed'`,
+  invalidates the in-process cache, next similarity request includes the
+  new paper.
+- **Submitter post-decision view** — pseudonymous `Reviewer 1..N` panel
+  feedback, real identity stays admin-only.
+- **Reviewer revocation + audit trail** — admin can revoke privileges; the
+  embedded `reviewer_snapshot` keeps historical assignments queryable.
+- **Insufficient-pool diagnostic** — when assignment fails, the admin
+  queue shows *exactly why* (e.g. *"Only 2 eligible reviewers — 1
+  same-institution conflict, 1 is the submitter."*).
+- **Idempotent demo seed** — one command produces a viva-ready dataset
+  (admin + 5 reviewers across 3 institutions + 3 users + 1 corpus paper +
+  1 review-eligible submission + 1 pending application).
 
-1. From the project root, enter the backend folder:
-```bash
-cd backend
+---
+
+## Tech stack
+
+### Frontend
+
+| Library | Purpose |
+|---|---|
+| **React 18** (`react`, `react-dom`) | UI framework / component model |
+| **React Router DOM 6** (`react-router-dom`) | Client-side routing |
+| **Axios** (`axios`) | HTTP client (carries the JWT cookie to the API) |
+| **react-scripts** (Create React App, dev only) | Dev server, build pipeline, Jest test runner |
+
+### Backend
+
+| Library | Purpose |
+|---|---|
+| **Python 3.11** | Runtime |
+| **Flask** (`Flask`) | Web framework / routing layer |
+| **Flask-Cors** (`Flask-Cors`) | CORS handling for the React dev server |
+| **PyJWT** (`PyJWT`) | JWT issuing & verification (auth cookies) |
+| **Werkzeug** / **Jinja2** / **itsdangerous** / **MarkupSafe** / **click** / **blinker** | Flask's standard runtime stack |
+| **cryptography** / **cffi** / **pycparser** | Backing crypto primitives used by JWT / TLS |
+| **requests** (`requests`) + **urllib3** / **certifi** / **idna** / **charset-normalizer** | Outbound HTTP (corpus download, fetch helpers) |
+| **sqlite3** (stdlib) | Database driver |
+
+### Document parsing & text extraction
+
+| Library | Purpose |
+|---|---|
+| **PyMuPDF** (`PyMuPDF` / `fitz`) | PDF text extraction for uploads and corpus papers |
+| **python-docx** (`python-docx`) | `.docx` text extraction |
+| **docx2txt** (`docx2txt`) | Fallback `.docx` extraction for legacy files |
+| **lxml** (`lxml`) | XML/HTML parsing backend used by `python-docx` |
+| **Pillow** (`pillow`) | Image handling for PDF / DOCX assets |
+
+### Detection pipeline
+
+| Library | Purpose |
+|---|---|
+| **NLTK** (`nltk`) | Tokenization + stopword list (used by the preprocessor) |
+| Custom n-gram + TF-IDF + cosine similarity | Implemented in `backend/app/utils/cosine.py` |
+| `colorama` | Coloured CLI output for ingest / dataset-builder scripts |
+| `typing_extensions` | Backport of typing helpers used across modules |
+
+### Storage & auth
+
+| Layer | Tech |
+|---|---|
+| Storage | SQLite (`backend/data/database.db`) + flat-file corpus (`backend/data/corpus/`) |
+| Auth    | JWT in HttpOnly cookies; RBAC enforced via Flask decorators (`require_admin`, `require_reviewer`) |
+
+---
+
+## Setup
+
+### Quick (Windows, recommended)
+
+```powershell
+.\setup.ps1
 ```
 
-2. Create and activate a virtual environment:
-```bash
+The script is idempotent: creates the venv, installs `requirements.txt`,
+runs `npm ci` in `frontend/`, downloads the seed corpus PDFs (~1.2 GB) if
+missing, initialises the SQLite schema, and ingests the seed corpus.
+
+### Manual
+
+```powershell
+# Backend
+cd backend
 python -m venv venv
-# Windows
-venv\Scripts\activate
-# OR macOS/Linux
-source venv/bin/activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Initialize the database:
-```bash
+.\venv\Scripts\activate
+pip install -r ..\requirements.txt
 python init_db.py
-```
+python app\utils\dataset_builder\ingest_papers.py   # optional, populates the seed corpus
+cd ..
+python backend\run_backend.py                       # starts the API on :5000
 
-5. **Ingest the corpus into the database** (required for plagiarism comparison):
-```bash
-python app/utils/dataset_builder/ingest_papers.py
-```
-⚠️ **Note**: The corpus PDFs must be present in `backend/data/raw_papers/` before ingesting. If not available, download them following the instructions below.
-
-6. Start the Flask server (from project root):
-```bash
-python backend/run_backend.py
-```
-
-Backend runs on `http://localhost:5000`
-
-#### Frontend Setup
-
-1. Navigate to the frontend directory:
-```bash
+# Frontend (separate shell)
 cd frontend
+npm ci
+npm start                                            # serves the SPA on :3000
 ```
 
-2. Install dependencies:
-```bash
-npm ci  # [DO NOT USE: npm install - use 'npm ci' for reproducible installs]
+> **`npm ci`, not `npm install`** — keeps everyone on the same lockfile.
+
+### One-command demo seed
+
+After the backend has initialised the DB at least once:
+
+```powershell
+python scripts\seed_demo_data.py
 ```
 
-3. Start the development server:
-```bash
-npm start
-```
+The script is idempotent — re-runs upsert the demo rows without
+disturbing the rest of the DB.
 
-Frontend runs on `http://localhost:3000`
+### Corpus download (manual fallback)
 
-#### Corpus Download (Manual)
+If `setup.ps1`'s automatic corpus download failed:
 
-If you need to download the corpus PDFs manually (or the automatic download in setup failed):
+1. Grab the bundle from the
+   [GitHub Release](https://github.com/Khatry-With-A-Y/plagiarism-detector-authentiq/releases/tag/Authentiq-Raw-PDFs).
+2. Extract into `backend/data/raw_papers/`.
+3. `cd backend && python app/utils/dataset_builder/ingest_papers.py`
+   (also idempotent — safely skips already-ingested papers).
 
-1. Download from the [GitHub Release](https://github.com/Khatry-With-A-Y/plagiarism-detector-authentiq/releases/tag/Authentiq-Raw-PDFs)
-2. Extract the zip file to `backend/data/raw_papers/`
-3. Run the ingestion script:
-```bash
-cd backend
-python app/utils/dataset_builder/ingest_papers.py
-```
+---
 
-The ingestion script is **idempotent** - it safely skips papers already in the database, so you can run it multiple times.
+## Demo credentials
 
-## Usage
+> Password = username for every demo account. The legacy `admin / admin`
+> account is auto-seeded by `init_db.py` and reused as the demo admin —
+> the seed script does **not** create a separate admin row.
 
-1. **Register/Login**: Create an account or login to access the platform (a default admin user, username/password = `admin`/`admin` is created)
-2. **Upload Document**: Upload your academic paper (.pdf, .doc, .docx)
-3. **Automatic Analysis**: The system automatically processes your document against the corpus
-4. **View Results**: See ranked similarity results with scores and paper details
-5. **Admin Features**: Admin users can manage the corpus by adding/removing papers
+| Role        | Username   | Notes |
+|---|---|---|
+| Admin       | `admin`    | Legacy account (auto-seeded by `init_db.py`); reused |
+| Reviewer    | `ram`      | Kathmandu University (`ku.edu.np`) |
+| Reviewer    | `sita`     | Kathmandu University (`ku.edu.np`) |
+| Reviewer    | `hari`     | Pokhara University (`pu.edu.np`) |
+| Reviewer    | `gita`     | Institute of Engineering (`ioe.edu.np`) |
+| Reviewer    | `bishnu`   | Institute of Engineering (`ioe.edu.np`) |
+| User        | `krishna`  | Owns the seeded review-eligible submission |
+| User        | `radha`    | — |
+| User        | `arjun`    | — |
+| Applicant   | `binod`    | TU; has a pending reviewer application |
 
-## API Endpoints
+---
 
-### Authentication
-- `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
-- `GET /api/auth/me` - Get current user info
+## End-to-end demo
 
-### Submissions
-- `POST /api/submissions/upload` - Upload file for analysis
-- `GET /api/submissions` - Get user's submission history
-- `GET /api/submissions/:id/results` - Get similarity results
-- `POST /api/process/:id` - Trigger processing
+1. **Apply.** Log in as `binod`, click *Apply to be a Reviewer* (or just
+   verify the pending application already exists).
+2. **Approve.** Log in as `admin`, open *Reviewer Applications*, approve
+   the applicant.
+3. **Submit.** Log in as `krishna`, open the seeded submission, click
+   *Request Peer Review*.
+4. **Assign.** As `admin`, open *Peer Review Queue* and click *Assign*.
+   Five reviewers across 3 institutions (`ram`, `sita`, `hari`, `gita`,
+   `bishnu`) are picked.
+5. **Review.** Log in as each reviewer (`ram` … `bishnu`) → *Accept* →
+   vote *Pass* / *Fail* with optional comment + fail-reason chips.
+6. **Decide.** Once majority is reached, as admin click *Approve*. The
+   Promotion Pipeline runs — the submission becomes a `papers` row with
+   `source='peer_reviewed'`.
+7. **Verify.** Have `radha` upload a paraphrase. The new corpus paper
+   appears in the similarity report (proves cache invalidation).
+8. **Submitter view.** Log back in as `krishna`, open the submission —
+   the *Reviewer Panel Feedback* section shows pseudonymous
+   `Reviewer 1..N` cards with admin's decision.
 
-### Corpus Management (Admin)
-- `POST /api/corpus/upload` - Add paper to corpus
-- `GET /api/corpus` - List all papers
-- `DELETE /api/corpus/:id` - Remove paper from corpus
+---
 
 ## Configuration
 
-Edit `backend/config.py` to customize:
-- Database path
-- File upload limits
-- JWT secret key (change in production!)
-- CORS origins
-- Allowed file extensions
+`backend/config.py` (key tunables):
 
-## Security Notes
+| Setting | Default | Meaning |
+|---|---|---|
+| `REVIEWERS_PER_REQUEST`        | 5     | Panel size |
+| `MIN_REVIEWERS_PER_REQUEST`    | 3     | Quorum threshold |
+| `REVIEW_DEADLINE_HOURS`        | 72    | Per-assignment deadline |
+| `REVIEW_ELIGIBILITY_THRESHOLD` | 0.20  | Max similarity to be review-eligible |
+| `STRICT_INSTITUTION_EXCLUSION` | True  | Anti-collusion filter on/off |
+| `DECLINE_REASON_MAX_LEN`       | 500   | Max chars in decline reason |
+| `DOMAIN_TAGS`                  | `['CS']` | Expertise taxonomy (single-tag) |
 
-- Change `JWT_SECRET_KEY` and `SECRET_KEY` in production
-- Use environment variables for sensitive configuration
-- Implement rate limiting for production use
-- Add file virus scanning for production
-- Use HTTPS in production
+---
+
+## Security & production caveats
+
+- `JWT_SECRET_KEY` and `SECRET_KEY` in `backend/config.py` are
+  **development defaults** — replace via env vars before any real deploy.
+- File scanning, rate-limiting, HTTPS, and SMTP delivery for the existing
+  `notifications` rows are out of scope. See
+  [`docs/limitations-and-future-work.md`](docs/limitations-and-future-work.md).
+- The single-process Flask deployment cannot be horizontally scaled
+  without re-introducing a versioned cache counter (e.g. a `meta(key,value)`
+  row or Redis `INCR`) so multiple workers can invalidate each other's
+  in-process corpus cache.
+
+---
 
 ## License
 
-This project is for educational purposes.
+Educational use only.

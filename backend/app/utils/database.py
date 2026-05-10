@@ -253,6 +253,12 @@ def init_database():
     if 'admin_decision_reason' not in submission_columns:
         cursor.execute("ALTER TABLE submissions ADD COLUMN admin_decision_reason TEXT")
         print("Added admin_decision_reason column to submissions table")
+    if 'pool_breakdown' not in submission_columns:
+        # Block 7 (Stage 7b): JSON dict written by `Submission.assign_many`
+        # whenever the pool flips to `insufficient_pool`. Stored so the admin
+        # queue can render the breakdown without re-running assignment.
+        cursor.execute("ALTER TABLE submissions ADD COLUMN pool_breakdown TEXT")
+        print("Added pool_breakdown column to submissions table")
     
     # Create similarity_results table
     cursor.execute('''
@@ -307,8 +313,13 @@ def init_database():
     #   - `papers`              (provenance columns: source, submission_id, ...)
     #   - `reviewers` (NEW)     (application + profile + revocation rolled into one)
     # No institutions/reviewer_profiles/reviewer_expertise/review_requests/
-    # review_assignments/review_vote_history/meta tables are created.
-    # corpus_version is derived from `MAX(id) FROM papers WHERE source='peer_reviewed'`.
+    # review_assignments/review_vote_history tables are created.
+    #
+    # Note: corpus cache invalidation is handled in-process by
+    # `CorpusCache.invalidate()` calls after each corpus mutation, plus a
+    # 60-second TTL backstop. This is sufficient for the single-process
+    # Flask deployment used here. A versioned counter (e.g. a `meta(key,value)`
+    # row, or Redis INCR) would be required for multi-worker gunicorn.
 
     # reviewers: single supplementary table keyed on user_id.
     # - Rows exist for anyone who has ever applied (pending/approved/rejected).

@@ -17,6 +17,9 @@ function ReviewerApplications() {
   const [appHistory, setAppHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Block 7 (Stage 7c): revoke confirmation modal
+  const [revokeModal, setRevokeModal] = useState({ show: false, app: null, reason: '' });
+  const [revokeError, setRevokeError] = useState(null);
 
   useEffect(() => {
     fetchApplications();
@@ -66,6 +69,31 @@ function ReviewerApplications() {
       fetchApplications();
     } catch (err) {
       alert("Error submitting decision: " + (err.response?.data?.error || err.message));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Block 7 (Stage 7c): revoke handler — flips role to 'user', stamps
+  // revoked_at, leaves historical assignments untouched (audit trail
+  // lives in their `reviewer_snapshot`).
+  const handleRevokeClick = (app) => {
+    setRevokeError(null);
+    setRevokeModal({ show: true, app, reason: '' });
+  };
+
+  const handleConfirmRevoke = async () => {
+    setIsSubmitting(true);
+    setRevokeError(null);
+    try {
+      await reviewersAPI.adminRevoke(
+        revokeModal.app.user_id,
+        revokeModal.reason.trim() || null,
+      );
+      setRevokeModal({ show: false, app: null, reason: '' });
+      fetchApplications();
+    } catch (err) {
+      setRevokeError(err.response?.data?.error || 'Revoke failed.');
     } finally {
       setIsSubmitting(false);
     }
@@ -136,8 +164,13 @@ function ReviewerApplications() {
                     </div>
                   </td>
                   <td>
-                    <span className={`dashboard-risk-badge ${app.application_status === 'approved' ? 'low' : app.application_status === 'pending' ? 'medium' : 'high'}`}>
-                        {app.application_status.toUpperCase()}
+                    {/* Block 7 (Stage 7c): show 'REVOKED' badge when reviewer was revoked. */}
+                    <span className={`dashboard-risk-badge ${
+                      app.revoked_at ? 'high' :
+                      app.application_status === 'approved' ? 'low' :
+                      app.application_status === 'pending' ? 'medium' : 'high'
+                    }`}>
+                        {app.revoked_at ? 'REVOKED' : app.application_status.toUpperCase()}
                     </span>
                   </td>
                   <td style={{ color: '#64748b' }}>{new Date(app.submitted_at).toLocaleDateString()}</td>
@@ -167,6 +200,17 @@ function ReviewerApplications() {
                                     Reject
                                 </button>
                             </>
+                        )}
+                        {/* Block 7 (Stage 7c): Revoke action for approved, non-revoked reviewers. */}
+                        {app.application_status === 'approved' && !app.revoked_at && (
+                            <button
+                                className="dashboard-view-link"
+                                style={{ color: '#dc2626', borderColor: '#f87171', padding: '6px 12px' }}
+                                onClick={() => handleRevokeClick(app)}
+                                title="Revoke reviewer privileges; historical assignments remain queryable for audit."
+                            >
+                                Revoke
+                            </button>
                         )}
                     </div>
                   </td>
@@ -323,6 +367,72 @@ function ReviewerApplications() {
                   <div className="dashboard-modal-footer">
                       <button className="dashboard-modal-btn dashboard-modal-btn-secondary" onClick={() => setBioModal({ show: false, app: null })}>
                           Close
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Block 7 (Stage 7c): Revoke confirmation modal */}
+      {revokeModal.show && (
+          <div className="dashboard-modal-overlay">
+              <div className="dashboard-modal" style={{ maxWidth: '500px' }}>
+                  <div className="dashboard-modal-header">
+                      <h3>Revoke Reviewer Status</h3>
+                      <p>Confirm revocation for {revokeModal.app.username}</p>
+                  </div>
+
+                  <div className="dashboard-modal-body">
+                      <div style={{
+                        padding: '12px 14px',
+                        background: '#fef2f2',
+                        border: '1px solid #fecaca',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        color: '#991b1b',
+                        marginBottom: '16px',
+                      }}>
+                        <strong>Warning:</strong> This action will:
+                        <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                          <li>Flip the user's role back to <code>user</code></li>
+                          <li>Remove all reviewer privileges</li>
+                          <li>Leave historical assignments intact (audit trail preserved via <code>reviewer_snapshot</code>)</li>
+                        </ul>
+                      </div>
+
+                      <div className="form-group">
+                          <label className="form-label">Reason for Revocation (optional)</label>
+                          <textarea
+                            className="auth-input-field"
+                            style={{ minHeight: '80px', padding: '12px' }}
+                            value={revokeModal.reason}
+                            onChange={(e) => setRevokeModal({ ...revokeModal, reason: e.target.value })}
+                            placeholder="e.g., Repeated low-quality reviews, conflict of interest pattern, requested withdrawal…"
+                            maxLength={500}
+                          />
+                      </div>
+
+                      {revokeError && (
+                          <div className="form-error" style={{ marginTop: '12px' }}>
+                              {revokeError}
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="dashboard-modal-footer">
+                      <button
+                        className="dashboard-modal-btn dashboard-modal-btn-secondary"
+                        onClick={() => setRevokeModal({ show: false, app: null, reason: '' })}
+                        disabled={isSubmitting}
+                      >
+                          Cancel
+                      </button>
+                      <button
+                        className="dashboard-modal-btn dashboard-modal-btn-danger"
+                        onClick={handleConfirmRevoke}
+                        disabled={isSubmitting}
+                      >
+                          {isSubmitting ? 'Revoking…' : 'Confirm Revocation'}
                       </button>
                   </div>
               </div>

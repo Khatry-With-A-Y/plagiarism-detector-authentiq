@@ -94,6 +94,9 @@ FAIL_COMMENT_MIN_LEN = 20
 COMMENT_MAX_LEN = 1000
 BIO_MAX_LEN = 2000
 
+# Decline-reason length cap (Block 5).
+DECLINE_REASON_MAX_LEN = 500
+
 # Deterministic assignment hook for tests. When set (e.g.,
 # ASSIGNMENT_TEST_SEED=12345), assign_many's ORDER BY RANDOM() is replaced
 # by a seeded stable ordering so tests are reproducible. Do NOT set in prod.

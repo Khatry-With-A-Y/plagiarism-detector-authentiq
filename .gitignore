@@ -29,6 +29,7 @@ instance/
 # OS
 .DS_Store
 Thumbs.db
+docs
 
 # Backend data folders
 backend/data/raw_papers/*

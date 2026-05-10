@@ -406,7 +406,8 @@ def upload_corpus_paper():
             uploaded_by=user['id']
         )
 
-        # Invalidate corpus cache so new paper is included in similarity checks
+        # Invalidate corpus cache so the next similarity request reloads
+        # and includes the freshly-uploaded paper.
         get_corpus_cache().invalidate()
 
         paper = Paper.get_by_id(paper_id)

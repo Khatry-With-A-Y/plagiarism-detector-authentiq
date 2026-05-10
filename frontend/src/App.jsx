@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { isAuthenticated, isAdmin as checkAdmin } from './utils/auth';
+import { getCurrentUser as apiGetCurrentUser } from './api/auth';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -10,6 +11,8 @@ import UserStatistics from './pages/user/UserStatistics';
 import CorpusManagement from './pages/admin/CorpusManagement';
 import UserManagement from './pages/admin/UserManagement';
 import ApplyReviewer from './pages/reviewer/ApplyReviewer';
+import ReviewerDashboard from './pages/reviewer/ReviewerDashboard';
+import ReviewDetail from './pages/reviewer/ReviewDetail';
 import './index.css';
 
 // Protected Route component
@@ -20,6 +23,60 @@ const ProtectedRoute = ({ children }) => {
 // Admin Route component
 const AdminRoute = ({ children }) => {
   return isAuthenticated() && checkAdmin() ? children : <Navigate to="/dashboard" />;
+};
+
+// Reviewer Route component — allows reviewer and admin roles
+const ReviewerRoute = ({ children }) => {
+  const [checkingRole, setCheckingRole] = useState(true);
+  const [canAccess, setCanAccess] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      setCheckingRole(false);
+      setCanAccess(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    try {
+      const cachedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      if (cachedUser.role === 'reviewer' || cachedUser.role === 'admin') {
+        setCanAccess(true);
+        setCheckingRole(false);
+        return;
+      }
+    } catch {
+      // Ignore malformed local cache and fall back to /auth/me.
+    }
+
+    apiGetCurrentUser()
+      .then((res) => {
+        const freshUser = res.data || {};
+        localStorage.setItem('user', JSON.stringify(freshUser));
+        if (!cancelled) {
+          setCanAccess(freshUser.role === 'reviewer' || freshUser.role === 'admin');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCanAccess(false);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCheckingRole(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!isAuthenticated()) return <Navigate to="/login" />;
+  if (checkingRole) return null;
+  return canAccess ? children : <Navigate to="/dashboard" />;
 };
 
 function App() {
@@ -59,6 +116,22 @@ function App() {
               <ProtectedRoute>
                 <ApplyReviewer />
               </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reviewer"
+            element={
+              <ReviewerRoute>
+                <ReviewerDashboard />
+              </ReviewerRoute>
+            }
+          />
+          <Route
+            path="/reviewer/assignments/:submissionId"
+            element={
+              <ReviewerRoute>
+                <ReviewDetail />
+              </ReviewerRoute>
             }
           />
           <Route
