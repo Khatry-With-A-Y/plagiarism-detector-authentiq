@@ -40,6 +40,10 @@ backend/data/processed/*
 backend/data/database.db
 !backend/data/raw_papers/cs_papers.json
 
+# Vendored NLTK corpora — keep tracked (see backend/data/nltk_data/README.md)
+!backend/data/nltk_data/
+!backend/data/nltk_data/**
+
 # Frontend
 frontend/node_modules/
 frontend/build/

@@ -1,22 +1,41 @@
+import os
 import re
 import functools
 from typing import List, Dict
 import nltk
 from nltk.stem import WordNetLemmatizer
-from nltk.corpus import wordnet
 
-# Download required NLTK data (only downloads if not present)
+# Vendored NLTK data lives under backend/data/nltk_data/ so the backend
+# never reaches out to raw.githubusercontent.com/nltk/nltk_data on first run.
+# __file__ is backend/app/utils/text_processing.py — three dirname() calls
+# land on backend/, then we join data/nltk_data.
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_NLTK_DATA_DIR = os.path.join(_BACKEND_DIR, 'data', 'nltk_data')
+
+if _NLTK_DATA_DIR not in nltk.data.path:
+    nltk.data.path.insert(0, _NLTK_DATA_DIR)
+
 def _ensure_nltk_data():
-    """Download required NLTK data packages if not already present."""
-    required_packages = [
-        ('corpora/wordnet', 'wordnet'),
-        ('corpora/omw-1.4', 'omw-1.4'),
-    ]
-    for path, package in required_packages:
-        try:
-            nltk.data.find(path)
-        except LookupError:
-            nltk.download(package, quiet=True)
+    """Verify the vendored NLTK corpora are present. Never download.
+
+    Checks file presence directly under _NLTK_DATA_DIR rather than via
+    nltk.data.find(), because find() walks the whole nltk.data.path list
+    and a developer who once ran `nltk.download(...)` (cached under
+    ~/nltk_data/) would mask a missing vendored copy and reintroduce the
+    invisible-dependency failure mode this change exists to prevent.
+    """
+    required_archives = ['wordnet.zip', 'omw-1.4.zip']
+    corpora_dir = os.path.join(_NLTK_DATA_DIR, 'corpora')
+    missing = [a for a in required_archives
+               if not os.path.isfile(os.path.join(corpora_dir, a))]
+    if missing:
+        raise RuntimeError(
+            "Vendored NLTK data missing: {names}. Expected under {dir}. "
+            "Restore the files from git (they are committed to the repo): "
+            "`git checkout -- backend/data/nltk_data` (or re-run setup.ps1).".format(
+                names=", ".join(missing), dir=corpora_dir,
+            )
+        )
 
 _ensure_nltk_data()
 

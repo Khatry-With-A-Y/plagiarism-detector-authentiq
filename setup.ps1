@@ -83,6 +83,20 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# ── Step 3.5: Verify vendored NLTK data is present ───────────────
+# WordNet + OMW-1.4 are committed to git under backend/data/nltk_data/
+# so the backend never has to call nltk.download(...) at runtime.
+# This is a pure file-existence check — no network call.
+$nltkOk = (Test-Path 'data\nltk_data\corpora\wordnet.zip') -and `
+          (Test-Path 'data\nltk_data\corpora\omw-1.4.zip')
+if (-not $nltkOk) {
+    Write-Host "[ERROR] Vendored NLTK data is missing under backend\data\nltk_data\corpora\." -ForegroundColor Red
+    Write-Host "        Expected files: wordnet.zip and omw-1.4.zip" -ForegroundColor Yellow
+    Write-Host "        Run: git checkout -- backend/data/nltk_data   (or re-clone the repo)" -ForegroundColor Yellow
+    exit 1
+}
+Write-Host "[3.5/6] Vendored NLTK data verified" -ForegroundColor Cyan
+
 # ── Step 4: Download corpus PDFs from GitHub Release ─────────────
 $pdfCount = (Get-ChildItem "data\raw_papers\*.pdf" -ErrorAction SilentlyContinue | Measure-Object).Count
 

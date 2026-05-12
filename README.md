@@ -77,7 +77,7 @@ tags so the next similarity check picks them up.
 
 | Library | Purpose |
 |---|---|
-| **NLTK** (`nltk`) | Tokenization + stopword list (used by the preprocessor) |
+| **NLTK** (`nltk`) | WordNet lemmatization; corpora are vendored under `backend/data/nltk_data/` — no runtime download |
 | Custom n-gram + TF-IDF + cosine similarity | Implemented in `backend/app/utils/cosine.py` |
 | `colorama` | Coloured CLI output for ingest / dataset-builder scripts |
 | `typing_extensions` | Backport of typing helpers used across modules |
@@ -110,7 +110,7 @@ missing, initialises the SQLite schema, and ingests the seed corpus.
 cd backend
 python -m venv venv
 .\venv\Scripts\activate
-pip install -r ..\requirements.txt
+pip install -r requirements.txt
 python init_db.py
 python app\utils\dataset_builder\ingest_papers.py   # optional, populates the seed corpus
 cd ..
