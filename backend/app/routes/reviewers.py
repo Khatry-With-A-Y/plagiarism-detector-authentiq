@@ -116,6 +116,55 @@ def my_application():
     return jsonify(app), 200
 
 
+@reviewers_bp.route('/me/behaviour', methods=['GET'])
+@require_auth
+def my_behaviour():
+    """Self-scoped reviewer behaviour snapshot used by the reviewer dashboard.
+
+    Returns the same shape as the admin /admin/behaviour rows but limited to
+    the caller. Surfaces:
+      - users.status (active|paused|blocked)
+      - paused_at / paused_until / paused_reason (if applicable)
+      - rolling-window counts: declines_window, countable_declines, expiries_window
+      - threshold constants (soft_limit, hard_limit, window_days)
+
+    The reviewer dashboard uses this to render a soft-warning banner once
+    `countable_declines >= soft_limit` and a paused banner once
+    `users.status === 'paused'`. See
+    .junie/plans/decline-handling-implementation.md.
+    """
+    from ...config import (REVIEWER_DECLINE_SOFT_LIMIT,
+                           REVIEWER_DECLINE_HARD_LIMIT,
+                           REVIEWER_DECLINE_WINDOW_DAYS)
+    user = get_current_user()
+    user_id = user['id']
+
+    # Reviewer row (paused_*) may be missing if the user has never applied.
+    rev = Reviewer.get_by_user_id(user_id)
+    counts = Reviewer._aggregate_assignment_counts(
+        user_id, window_days=REVIEWER_DECLINE_WINDOW_DAYS
+    )
+
+    return jsonify({
+        'user_id':            user_id,
+        'username':           user.get('username'),
+        'status':             user.get('status') or 'active',
+        'application_status': (rev or {}).get('application_status'),
+        'paused_at':          (rev or {}).get('paused_at'),
+        'paused_by':          (rev or {}).get('paused_by'),
+        'paused_reason':      (rev or {}).get('paused_reason'),
+        'paused_until':       (rev or {}).get('paused_until'),
+        'window_days':        counts['window_days'],
+        'declines_window':    counts['declines'],
+        'countable_declines': counts['countable_declines'],
+        'expiries_window':    counts['expiries'],
+        'votes_window':       counts['votes'],
+        'total_assignments':  counts['total_assignments'],
+        'soft_limit':         REVIEWER_DECLINE_SOFT_LIMIT,
+        'hard_limit':         REVIEWER_DECLINE_HARD_LIMIT,
+    }), 200
+
+
 @reviewers_bp.route('/applications/my/resend-verification', methods=['POST'])
 @require_auth
 def resend_verification():
@@ -393,3 +442,263 @@ def revoke_reviewer(target_user_id):
         }), 200
     except Exception as e:
         return jsonify({'error': f'Revoke failed: {str(e)}'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Decline-handling accountability layer (Step 4):
+# Admin manual pause / unpause levers. The reviewer's account stays valid
+# (they can still log in and finish in-flight assignments) but they are
+# excluded from `assign_many`'s candidate pool while paused. The lazy
+# auto-unpause sweep in `Reviewer.sweep_paused_reviewers()` only clears
+# `auto:`-prefixed pause reasons; admin manual pauses are sticky until an
+# admin explicitly unpauses.
+#
+# See .junie/plans/decline-handling-implementation.md.
+# ---------------------------------------------------------------------------
+
+@reviewers_bp.route('/admin/behaviour', methods=['GET'])
+@require_admin
+def admin_reviewer_behaviour():
+    """Decline-handling Step 5: admin Reviewer Behaviour aggregation.
+
+    Returns one row per approved (and not-revoked) reviewer, with the
+    rolling-window decline / expiry / vote counts computed on-demand from
+    `submissions.review_votes` via `Reviewer._aggregate_assignment_counts`.
+
+    Calls `Reviewer.sweep_paused_reviewers()` first so the returned
+    `status` and `paused_*` fields always reflect the post-sweep state
+    (any auto-paused reviewer whose window has rolled over will already
+    be flipped back to `'active'` here).
+
+    Each row also includes the configured `soft_limit` / `hard_limit` /
+    `window_days` so the UI can render the badges without re-reading the
+    backend config.
+    """
+    from ...config import (REVIEWER_DECLINE_SOFT_LIMIT,
+                           REVIEWER_DECLINE_HARD_LIMIT,
+                           REVIEWER_DECLINE_WINDOW_DAYS)
+    from ..models.models import get_db_connection
+
+    # Step 4 sweep before computing so paused state is fresh.
+    try:
+        Reviewer.sweep_paused_reviewers()
+    except Exception:
+        pass
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            '''
+            SELECT r.user_id,
+                   u.username,
+                   u.email,
+                   u.status,
+                   r.institution_domain,
+                   r.institution_name,
+                   r.application_status,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.paused_at)    AS paused_at,
+                   r.paused_by,
+                   r.paused_reason,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.paused_until) AS paused_until,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.revoked_at)   AS revoked_at
+            FROM reviewers r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.application_status = 'approved'
+              AND r.revoked_at IS NULL
+            ORDER BY r.institution_domain, u.username
+            '''
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    out = []
+    for row in rows:
+        try:
+            counts = Reviewer._aggregate_assignment_counts(
+                row['user_id'], window_days=REVIEWER_DECLINE_WINDOW_DAYS
+            )
+        except Exception:
+            counts = {
+                'declines':            0,
+                'countable_declines':  0,
+                'expiries':            0,
+                'votes':               0,
+                'total_assignments':   0,
+                'window_days':         REVIEWER_DECLINE_WINDOW_DAYS,
+            }
+        out.append({
+            'user_id':             row['user_id'],
+            'username':            row['username'],
+            'email':               row['email'],
+            'status':              row['status'] or 'active',
+            'institution_domain':  row['institution_domain'],
+            'institution_name':    row['institution_name'],
+            'paused_at':           row['paused_at'],
+            'paused_by':           row['paused_by'],
+            'paused_reason':       row['paused_reason'],
+            'paused_until':        row['paused_until'],
+            'window_days':         counts['window_days'],
+            'declines_window':     counts['declines'],
+            'countable_declines':  counts['countable_declines'],
+            'expiries_window':     counts['expiries'],
+            'votes_window':        counts['votes'],
+            'total_assignments':   counts['total_assignments'],
+            'soft_limit':          REVIEWER_DECLINE_SOFT_LIMIT,
+            'hard_limit':          REVIEWER_DECLINE_HARD_LIMIT,
+        })
+
+    return jsonify({
+        'reviewers':   out,
+        'soft_limit':  REVIEWER_DECLINE_SOFT_LIMIT,
+        'hard_limit':  REVIEWER_DECLINE_HARD_LIMIT,
+        'window_days': REVIEWER_DECLINE_WINDOW_DAYS,
+    }), 200
+
+
+@reviewers_bp.route(
+    '/admin/<int:target_user_id>/decline-events', methods=['GET']
+)
+@require_admin
+def admin_reviewer_decline_events(target_user_id):
+    """Decline-handling Step 5: expand row -> recent decline JSON entries.
+
+    Returns the up-to-N most recent declined `review_votes` entries for
+    the given reviewer (across all submissions), so the admin can
+    inspect categories and individually waive entries from the
+    Reviewer Behaviour page.
+
+    Each entry includes the parent submission id and a derived
+    `is_countable` flag for the UI.
+    """
+    from ...config import DECLINE_COUNTABLE_CATEGORIES
+    from ..models.models import get_db_connection
+    import json as _json
+
+    limit = int(request.args.get('limit', 20))
+    limit = max(1, min(limit, 100))
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            '''
+            SELECT s.id AS submission_id,
+                   s.filename,
+                   s.review_votes
+            FROM submissions s
+            WHERE s.review_votes IS NOT NULL
+              AND s.review_votes != '[]'
+              AND EXISTS (
+                  SELECT 1 FROM json_each(s.review_votes) je
+                  WHERE json_extract(je.value, '$.reviewer_id') = ?
+                    AND json_extract(je.value, '$.assignment_status') = 'declined'
+              )
+            ORDER BY s.id DESC
+            ''',
+            (target_user_id,),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    events = []
+    for row in rows:
+        try:
+            votes = _json.loads(row['review_votes'] or '[]')
+        except Exception:
+            continue
+        for entry in votes:
+            if entry.get('reviewer_id') != target_user_id:
+                continue
+            if entry.get('assignment_status') != 'declined':
+                continue
+            category = entry.get('decline_reason_category') or 'unspecified'
+            is_waived = bool(entry.get('waived'))
+            is_countable = (not is_waived) and (category in DECLINE_COUNTABLE_CATEGORIES)
+            events.append({
+                'submission_id':           row['submission_id'],
+                'filename':                row['filename'],
+                'assignment_id':           entry.get('assignment_id'),
+                'declined_at':             entry.get('declined_at'),
+                'decline_reason':          entry.get('decline_reason'),
+                'decline_reason_category': category,
+                'waived':                  is_waived,
+                'waived_by':               entry.get('waived_by'),
+                'waived_at':               entry.get('waived_at'),
+                'is_countable':            is_countable,
+            })
+
+    # Sort by declined_at desc (string ISO8601 sorts correctly) and cap.
+    events.sort(key=lambda e: e.get('declined_at') or '', reverse=True)
+    return jsonify({'events': events[:limit]}), 200
+
+
+@reviewers_bp.route('/admin/<int:target_user_id>/pause', methods=['POST'])
+@require_admin
+def pause_reviewer(target_user_id):
+    """Admin manual pause for a reviewer.
+
+    Body (JSON, optional): {"reason": "<free-text>"}.
+    """
+    admin = get_current_user()
+    data = request.get_json(silent=True) or {}
+    reason = data.get('reason')
+
+    # Don't let an admin pause themselves.
+    if target_user_id == admin['id']:
+        return jsonify({'error': 'You cannot pause your own reviewer status.'}), 400
+
+    target = Reviewer.get_by_user_id(target_user_id)
+    if not target:
+        return jsonify({'error': 'Reviewer not found'}), 404
+    if target.get('revoked_at'):
+        return jsonify({'error': 'Cannot pause a revoked reviewer.'}), 400
+    if target.get('application_status') != 'approved':
+        return jsonify({'error': 'Only approved reviewers can be paused.'}), 400
+
+    try:
+        result = Reviewer.pause(target_user_id, admin['id'], reason)
+        return jsonify({
+            'message':       'Reviewer paused.',
+            'user_id':       target_user_id,
+            'paused_by':     admin['id'],
+            'paused_reason': result.get('paused_reason'),
+            'status':        result.get('status'),
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Pause failed: {str(e)}'}), 500
+
+
+@reviewers_bp.route('/admin/<int:target_user_id>/unpause', methods=['POST'])
+@require_admin
+def unpause_reviewer(target_user_id):
+    """Admin manual unpause for a reviewer.
+
+    Clears `paused_*` metadata and flips `users.status` back to `'active'`.
+    Idempotent: unpausing a non-paused reviewer returns 200 with
+    `status='already_active'`.
+    """
+    admin = get_current_user()
+
+    target = Reviewer.get_by_user_id(target_user_id)
+    if not target:
+        return jsonify({'error': 'Reviewer not found'}), 404
+    if target.get('revoked_at'):
+        return jsonify({'error': 'Cannot unpause a revoked reviewer.'}), 400
+
+    try:
+        result = Reviewer.unpause(target_user_id, admin['id'])
+        return jsonify({
+            'message':     'Reviewer unpaused.',
+            'user_id':     target_user_id,
+            'unpaused_by': admin['id'],
+            'status':      result.get('status'),
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Unpause failed: {str(e)}'}), 500

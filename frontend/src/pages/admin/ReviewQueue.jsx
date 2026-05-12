@@ -3,6 +3,42 @@ import { reviewsAPI } from '../../api/reviews';
 import '../dashboard.css';
 
 /**
+ * Human-readable labels for the structured fail-reason taxonomy. Mirrors
+ * the reviewer's `ReviewDetail.jsx` map so the admin sees the exact
+ * wording the reviewer ticked at vote time (instead of raw enum slugs).
+ *
+ * Keep in sync with `backend/config.py::FAIL_REASON_TAXONOMY`.
+ */
+const FAIL_REASON_LABELS = {
+  suspected_paraphrase:  'Suspected paraphrasing of existing corpus',
+  insufficient_citation: 'Insufficient citation',
+  low_content_quality:   'Content quality below threshold',
+  out_of_scope:          'Out of CS scope',
+  other:                 'Other (see comment)',
+};
+
+/**
+ * Human-readable label for an assignment_status enum value. Reused by
+ * the per-reviewer cards in the admin "Review Details" modal so the
+ * status badge reads naturally ("Completed", "Declined") instead of
+ * the raw lowercase slug.
+ *
+ * The `voted` row is labeled "Completed" (and rendered with the muted
+ * `.completed` grey badge — see `dashboard.css`) rather than the older
+ * green "Voted" pill, because the green tint was misleading: a reviewer
+ * who voted *fail* still got a green status pill. The actual pass/fail
+ * outcome lives in a separate "Vote: …" badge on the same card.
+ */
+const ASSIGNMENT_STATUS_LABELS = {
+  assigned:  'Assigned',
+  accepted:  'Accepted',
+  voted:     'Completed',
+  declined:  'Declined',
+  expired:   'Expired',
+  cancelled: 'Closed by admin',
+};
+
+/**
  * Block 7 (Stage 7b): renders a one-glance hint explaining *why* the
  * reviewer pool was short, given the structured breakdown returned by
  * `assign_many`. Falls back to a generic message if the breakdown is
@@ -52,6 +88,259 @@ function PoolBreakdownHint({ breakdown }) {
       <div style={{ marginTop: '4px', color: '#78350f' }}>
         Onboard ≥1 reviewer from a different institution and click Assign again.
       </div>
+    </div>
+  );
+}
+
+/**
+ * Compact `YYYY-MM-DD · HH:MM` formatter used inside the reviewer
+ * cards. Returns `null` for missing inputs so callers can short-circuit
+ * the surrounding label, and silently swallows malformed strings instead
+ * of crashing the modal.
+ */
+function formatReviewDateTime(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('en-US', {
+    year:  'numeric',
+    month: 'short',
+    day:   'numeric',
+    hour:  '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * Single reviewer entry inside the admin "Review Details" modal.
+ *
+ * Replaces the previous narrow, ellipsis-truncated table cell so that:
+ *   1. The reviewer's full comment is always visible (no hover-only).
+ *   2. The structured fail_reasons checklist is rendered as chips with
+ *      human-readable labels, exactly as the reviewer saw them at vote
+ *      time.
+ *   3. Decline / expiry / admin-cancel rows show a dedicated banner
+ *      explaining *why* the assignment is inactive.
+ *   4. Lifecycle timestamps (assigned/accepted/voted) are surfaced for
+ *      audit trace.
+ */
+function ReviewerPanelCard({ assignment, index }) {
+  const status = assignment.assignment_status || '';
+  const isInactive = ['declined', 'expired', 'cancelled'].includes(status);
+  const vote = assignment.vote;
+
+  // Status badge variant. `voted` uses the muted `completed` grey so
+  // the status pill no longer conflates with the pass-colored vote
+  // outcome badge that sits next to it on the same card.
+  const statusCls =
+    status === 'voted'    ? 'completed' :
+    status === 'accepted' ? 'medium' :
+    isInactive             ? 'high' :
+                             'pending';
+
+  // Left-border accent on the card: green/red for pass/fail, blue when
+  // the reviewer has actively accepted the assignment and is working on
+  // the review but hasn't voted yet, grey when the assignment is still
+  // untouched (or vote is moot because the row is inactive).
+  const cardVariant =
+    vote === 'pass'                        ? 'vote-pass'        :
+    vote === 'fail'                        ? 'vote-fail'        :
+    (status === 'accepted' && !isInactive) ? 'vote-in-progress' :
+                                             'vote-pending';
+
+  // Reviewer identity. Admin gets the full snapshot; we fall back to the
+  // numeric id so test fixtures without a snapshot still render cleanly.
+  const reviewerLabel =
+    assignment.reviewer_snapshot?.username
+      ? `@${assignment.reviewer_snapshot.username}`
+      : (assignment.reviewer_id ? `Reviewer #${assignment.reviewer_id}` : `Reviewer ${index + 1}`);
+  const institution = assignment.reviewer_snapshot?.institution_name;
+
+  // Human-readable explainer for inactive assignments. Mirrors the
+  // logic of the old "Comment" cell so admins still see *why* a row is
+  // missing a vote.
+  let inactiveExplainer = null;
+  if (status === 'declined') {
+    inactiveExplainer = assignment.decline_reason
+      ? `Reviewer declined — “${assignment.decline_reason}”.`
+      : 'Reviewer declined without leaving a reason.';
+  } else if (status === 'expired') {
+    inactiveExplainer = 'Assignment auto-expired (deadline passed without a response).';
+  } else if (status === 'cancelled') {
+    const reason = assignment.cancellation_reason;
+    if (reason === 'admin_finalized_approve') {
+      inactiveExplainer = 'Closed by admin — submission was approved before this reviewer voted.';
+    } else if (reason === 'admin_finalized_reject') {
+      inactiveExplainer = 'Closed by admin — submission was rejected before this reviewer voted.';
+    } else if (reason) {
+      inactiveExplainer = `Closed by admin — ${reason}.`;
+    } else {
+      inactiveExplainer = 'Closed by admin before this reviewer voted.';
+    }
+  }
+
+  // Lifecycle timestamps we want to surface. Order matters: we render
+  // the most informative one for the current state.
+  const assignedAt = formatReviewDateTime(assignment.assigned_at);
+  const acceptedAt = formatReviewDateTime(assignment.accepted_at);
+  const votedAt    = formatReviewDateTime(assignment.completed_at);
+  const declinedAt = formatReviewDateTime(assignment.declined_at);
+  const expiredAt  = formatReviewDateTime(assignment.expired_at);
+  const cancelledAt = formatReviewDateTime(assignment.cancelled_at);
+  const deadlineAt = formatReviewDateTime(assignment.deadline_at);
+
+  let metaTimestamp = null;
+  if (status === 'voted' && votedAt)            metaTimestamp = `Voted ${votedAt}`;
+  else if (status === 'declined' && declinedAt) metaTimestamp = `Declined ${declinedAt}`;
+  else if (status === 'expired' && expiredAt)   metaTimestamp = `Expired ${expiredAt}`;
+  else if (status === 'cancelled' && cancelledAt) metaTimestamp = `Closed ${cancelledAt}`;
+  else if (status === 'accepted' && acceptedAt) metaTimestamp = `Accepted ${acceptedAt}`;
+  else if (assignedAt)                          metaTimestamp = `Assigned ${assignedAt}`;
+
+  const hasComment = !!(assignment.comment && assignment.comment.trim());
+  const failReasons = Array.isArray(assignment.fail_reasons) ? assignment.fail_reasons : [];
+
+  return (
+    <div className={`review-panel-card ${cardVariant} ${isInactive ? 'inactive' : ''}`}>
+      <div className="review-panel-card-header">
+        <span className="review-panel-reviewer" title={institution || undefined}>
+          {reviewerLabel}
+          {institution && (
+            <span style={{ fontWeight: 400, color: '#64748b', fontSize: '12px' }}>
+              · {institution}
+            </span>
+          )}
+        </span>
+
+        <span className={`dashboard-risk-badge ${statusCls}`} style={{ fontSize: '11px' }}>
+          {ASSIGNMENT_STATUS_LABELS[status] || status || 'Unknown'}
+        </span>
+
+        {vote ? (
+          <span
+            className={`dashboard-risk-badge ${vote === 'pass' ? 'low' : 'high'}`}
+            style={{ fontSize: '11px' }}
+          >
+            Vote: {vote === 'pass' ? 'Pass' : 'Fail'}
+          </span>
+        ) : !isInactive ? (
+          <span className="dashboard-risk-badge pending" style={{ fontSize: '11px' }}>
+            Vote: Pending
+          </span>
+        ) : null}
+
+        {assignment.conflict_flag ? (
+          <span className="review-panel-conflict-chip" title="Same-institution conflict was overridden to fill the panel.">
+            ⚠ Conflict overridden
+          </span>
+        ) : null}
+
+        {metaTimestamp && (
+          <span className="review-panel-meta">{metaTimestamp}</span>
+        )}
+        {!isInactive && status !== 'voted' && deadlineAt && (
+          <span className="review-panel-meta" style={{ color: '#92400e' }}>
+            · Due {deadlineAt}
+          </span>
+        )}
+      </div>
+
+      {isInactive ? (
+        <div className="review-panel-inactive-banner">
+          <span className="review-panel-inactive-icon" aria-hidden="true">ℹ</span>
+          <span>{inactiveExplainer}</span>
+        </div>
+      ) : (
+        <>
+          {/* Ticked failure-reason chips — only shown for fail votes. */}
+          {vote === 'fail' && failReasons.length > 0 && (
+            <>
+              <div className="review-panel-section-label">Reasons cited</div>
+              <div className="review-panel-reasons">
+                {failReasons.map(r => (
+                  <span
+                    key={r}
+                    className="dashboard-risk-badge high"
+                    style={{ fontSize: '11px' }}
+                  >
+                    {FAIL_REASON_LABELS[r] || r.replace(/_/g, ' ')}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+          {vote === 'fail' && failReasons.length === 0 && (
+            <>
+              <div className="review-panel-section-label">Reasons cited</div>
+              <div className="review-panel-comment empty">
+                No structured reasons were recorded for this fail vote.
+              </div>
+            </>
+          )}
+
+          {/* Reviewer comment — full text, wrapping, no hover-only. */}
+          {(vote || hasComment) && (
+            <>
+              <div className="review-panel-section-label">Comment</div>
+              {hasComment ? (
+                <p className="review-panel-comment">{assignment.comment}</p>
+              ) : (
+                <p className="review-panel-comment empty">
+                  {vote
+                    ? 'Reviewer did not leave a written comment.'
+                    : 'No comment yet — reviewer has not voted.'}
+                </p>
+              )}
+            </>
+          )}
+
+          {/* "Accepted but not yet voted" placeholder so the card still
+              has body content and admins can see the reviewer is
+              engaged. */}
+          {!vote && status === 'accepted' && !hasComment && (
+            <div className="review-panel-inactive-banner" style={{
+              background: '#eff6ff', borderColor: '#bfdbfe', color: '#1e40af',
+            }}>
+              <svg
+                className="review-panel-inactive-icon"
+                aria-hidden="true"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15 14" />
+              </svg>
+              <span>Reviewer accepted the assignment and is preparing their vote.</span>
+            </div>
+          )}
+          {!vote && status === 'assigned' && (
+            <div className="review-panel-inactive-banner">
+              <svg
+                className="review-panel-inactive-icon"
+                aria-hidden="true"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15 14" />
+              </svg>
+              <span>Awaiting reviewer response (assignment not yet accepted).</span>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -167,9 +456,9 @@ function ReviewQueue() {
   const submitDecision = async () => {
     if (!decisionModal) return;
     const { submissionId, mode, reviewStatus } = decisionModal;
-    const isPreQuorum = reviewStatus !== 'awaiting_admin';
-    if (isPreQuorum && !decisionForm.reason.trim()) {
-      setDecisionError('A reason is required when overriding a request before the panel reaches quorum.');
+    const isPanelIncomplete = reviewStatus !== 'awaiting_admin';
+    if (isPanelIncomplete && !decisionForm.reason.trim()) {
+      setDecisionError('A reason is required when overriding a request before the panel has finished voting.');
       return;
     }
     setDecisionSubmitting(true);
@@ -238,11 +527,20 @@ function ReviewQueue() {
       <div className="dashboard-reports">
         <div className="dashboard-reports-header">
            <div className="dashboard-reports-actions">
+              {/*
+                `.auth-input-field` defaults to `padding: 12px 14px` with
+                `line-height: 1.5`, which leaves only ~16px of content
+                height inside the fixed 40px box and clips the option
+                label along the bottom. Zero out vertical padding via
+                the `paddingTop` / `paddingBottom` longhands so the
+                `padding-right: 40px` reserved for the custom caret in
+                `select.auth-input-field` is preserved.
+              */}
               <select 
                 value={status} 
                 onChange={(e) => { setStatus(e.target.value); setPage(1); }}
                 className="auth-input-field"
-                style={{ width: '220px', height: '40px', marginBottom: 0, fontSize: '14px' }}
+                style={{ width: '220px', height: '40px', marginBottom: 0, fontSize: '14px', paddingTop: 0, paddingBottom: 0 }}
               >
                 <option value="">All Statuses</option>
                 <option value="pending">Pending Assignment</option>
@@ -332,19 +630,22 @@ function ReviewQueue() {
                             View Details
                           </button>
                         )}
-                        {/* Block 6: inline Approve/Reject for awaiting_admin */}
+                        {/* Block 6: inline Approve/Reject for awaiting_admin.
+                            Uses the green/red outlined-pill variants of
+                            `dashboard-view-link` so the buttons match the
+                            outline → tinted-fill hover treatment used by
+                            the Approve & Promote / Reject buttons in the
+                            Review Details modal. */}
                         {req.review_status === 'awaiting_admin' && (
                           <>
                             <button
-                              className="dashboard-view-link"
-                              style={{ color: '#10b981' }}
+                              className="dashboard-view-link approve"
                               onClick={() => openDecisionModal('approve', req)}
                             >
                               Approve
                             </button>
                             <button
-                              className="dashboard-view-link"
-                              style={{ color: '#dc2626' }}
+                              className="dashboard-view-link reject"
                               onClick={() => openDecisionModal('reject', req)}
                             >
                               Reject
@@ -413,30 +714,74 @@ function ReviewQueue() {
       {/* Detail modal */}
       {(detailLoading || detailModal) && (
         <div className="dashboard-modal-overlay" onClick={() => setDetailModal(null)}>
-          <div className="dashboard-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '680px', width: '95%' }}>
+          <div className="dashboard-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '760px', width: '95%' }}>
             <div className="dashboard-modal-header">
-              <h3 className="dashboard-modal-title">Review Details</h3>
+              <div style={{ minWidth: 0 }}>
+                <h3 className="dashboard-modal-title">Review Details</h3>
+                {detailModal?.filename && (
+                  <p style={{
+                    margin: '4px 0 0', fontSize: '13px', color: '#64748b',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    maxWidth: '520px',
+                  }}>
+                    {detailModal.filename}
+                    <span style={{ color: '#94a3b8', marginLeft: '6px' }}>
+                      · Submission #{detailModal.submission_id}
+                    </span>
+                  </p>
+                )}
+              </div>
               <button className="dashboard-modal-close" onClick={() => setDetailModal(null)}>✕</button>
             </div>
-            <div className="dashboard-modal-body">
+            <div className="dashboard-modal-body review-detail-modal-body">
               {detailLoading ? (
                 <p style={{ color: '#64748b' }}>Loading…</p>
               ) : detailModal?.error ? (
                 <p style={{ color: '#dc2626' }}>{detailModal.error}</p>
               ) : (
                 <>
-                  <div style={{ display: 'flex', gap: '24px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                    <div><strong>Status:</strong> <span className={`dashboard-risk-badge ${
-                      detailModal.review_status === 'approved' ? 'low' :
-                      detailModal.review_status === 'rejected' ? 'critical' :
-                      detailModal.review_status === 'awaiting_admin' ? 'medium' : 'pending'
-                    }`}>{detailModal.review_status}</span></div>
-                    <div><strong>Outcome:</strong> {detailModal.review_outcome
-                      ? <span className={`dashboard-risk-badge ${detailModal.review_outcome === 'pass' ? 'low' : 'high'}`}>{detailModal.review_outcome}</span>
-                      : <span style={{ color: '#94a3b8' }}>Pending</span>}
+                  {/* Top-of-modal summary strip: status, outcome, vote
+                      tallies. Replaces the inline label/value row. */}
+                  <div className="review-summary-grid">
+                    <div className="review-summary-stat">
+                      <span className="review-summary-stat-label">Status</span>
+                      <span className="review-summary-stat-value">
+                        <span className={`dashboard-risk-badge ${
+                          detailModal.review_status === 'approved' ? 'low' :
+                          detailModal.review_status === 'rejected' ? 'high' :
+                          detailModal.review_status === 'awaiting_admin' ? 'medium' : 'pending'
+                        }`} style={{ fontSize: '11px' }}>
+                          {(detailModal.review_status || '—')
+                            .replace(/_/g, ' ')
+                            .replace(/\b\w/g, c => c.toUpperCase())}
+                        </span>
+                      </span>
                     </div>
-                    <div><strong>Pass votes:</strong> {detailModal.pass_votes}</div>
-                    <div><strong>Fail votes:</strong> {detailModal.fail_votes}</div>
+                    <div className="review-summary-stat">
+                      <span className="review-summary-stat-label">Panel Outcome</span>
+                      <span className="review-summary-stat-value">
+                        {detailModal.review_outcome ? (
+                          <span className={`dashboard-risk-badge ${detailModal.review_outcome === 'pass' ? 'low' : 'high'}`}
+                                style={{ fontSize: '11px' }}>
+                            {detailModal.review_outcome === 'pass' ? 'Pass' : 'Fail'}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontWeight: 400, fontSize: '13px' }}>Pending</span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="review-summary-stat">
+                      <span className="review-summary-stat-label">Pass Votes</span>
+                      <span className="review-summary-stat-value" style={{ color: '#059669' }}>
+                        {detailModal.pass_votes ?? 0}
+                      </span>
+                    </div>
+                    <div className="review-summary-stat">
+                      <span className="review-summary-stat-label">Fail Votes</span>
+                      <span className="review-summary-stat-value" style={{ color: '#dc2626' }}>
+                        {detailModal.fail_votes ?? 0}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Block 7: insufficient_pool breakdown panel */}
@@ -449,91 +794,98 @@ function ReviewQueue() {
                   {/* Block 6: admin-decision audit panel (only when a decision has been recorded) */}
                   {detailModal.admin_decision && (
                     <div style={{
-                      background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '6px',
-                      padding: '10px 12px', marginBottom: '16px', fontSize: '13px'
+                      background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px',
+                      borderLeft: `4px solid ${detailModal.admin_decision === 'approved' ? '#10b981' : '#dc2626'}`,
+                      padding: '12px 14px', marginBottom: '18px', fontSize: '13px'
                     }}>
-                      <div style={{ marginBottom: '4px' }}>
-                        <strong>Admin Decision:</strong>{' '}
-                        <span className={`dashboard-risk-badge ${detailModal.admin_decision === 'approved' ? 'low' : 'critical'}`}>
-                          {detailModal.admin_decision}
+                      <div style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <strong style={{ color: '#1e293b' }}>Admin Decision:</strong>
+                        <span className={`dashboard-risk-badge ${detailModal.admin_decision === 'approved' ? 'low' : 'high'}`}
+                              style={{ fontSize: '11px' }}>
+                          {detailModal.admin_decision === 'approved' ? 'Approved' : 'Rejected'}
                         </span>
                         {detailModal.admin_decided_at && (
-                          <span style={{ color: '#64748b', marginLeft: '8px' }}>
+                          <span style={{ color: '#64748b' }}>
                             on {formatDate(detailModal.admin_decided_at)}
                           </span>
                         )}
                       </div>
                       {detailModal.admin_decision_reason && (
-                        <div style={{ color: '#374151' }}>
+                        <div style={{ color: '#374151', lineHeight: 1.5 }}>
                           <strong>Reason:</strong> {detailModal.admin_decision_reason}
                         </div>
                       )}
                     </div>
                   )}
 
-                  <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '10px' }}>Reviewer Panel</h4>
+                  <div className="review-panel-heading">
+                    <h4>Reviewer Panel</h4>
+                    {detailModal.assignments?.length > 0 && (
+                      <span className="review-panel-heading-hint">
+                        {detailModal.assignments.length} reviewer{detailModal.assignments.length === 1 ? '' : 's'} assigned
+                      </span>
+                    )}
+                    {/* Decline-handling Step 5: per-submission decline-churn
+                        badge. Surfaces how many reviewers have declined
+                        *this* submission so admins notice churn without
+                        opening the Reviewer Behaviour page.
+
+                        Counted from the same `assignments` array (which
+                        the backend serializes from `submissions.review_votes`).
+                        See .junie/plans/decline-handling-implementation.md. */}
+                    {(() => {
+                      const priorDeclines = (detailModal.assignments || []).filter(
+                        (a) => a.assignment_status === 'declined'
+                      ).length;
+                      if (!priorDeclines) return null;
+                      return (
+                        <span
+                          className="dashboard-risk-badge medium"
+                          style={{ fontSize: '11px', marginLeft: '8px' }}
+                          title="Number of reviewers who declined this submission. High churn may indicate a topic-fit or pool-size problem."
+                        >
+                          {priorDeclines} prior decline{priorDeclines === 1 ? '' : 's'} on this submission
+                        </span>
+                      );
+                    })()}
+                  </div>
+
                   {(!detailModal.assignments || detailModal.assignments.length === 0) ? (
-                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>No reviewers assigned yet.</p>
+                    <div className="review-panel-empty">
+                      No reviewers have been assigned to this submission yet.
+                    </div>
                   ) : (
-                    <table className="dashboard-table" style={{ fontSize: '12px' }}>
-                      <thead>
-                        <tr>
-                          <th>Reviewer ID</th>
-                          <th>Status</th>
-                          <th>Vote</th>
-                          <th>Comment</th>
-                          <th>Conflict</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detailModal.assignments.map((a, i) => {
-                          const isInactive = ['declined', 'expired'].includes(a.assignment_status);
-                          const statusCls =
-                            a.assignment_status === 'voted'    ? 'low' :
-                            a.assignment_status === 'accepted' ? 'medium' :
-                            isInactive                          ? 'high' :
-                                                                  'pending';
-                          // Block 5: surface the decline_reason / expiry in
-                          // the comment column so admins see attrition
-                          // alongside active reviewer rationale.
-                          const commentCell = isInactive
-                            ? (a.assignment_status === 'declined'
-                                ? `Declined${a.decline_reason ? ` — ${a.decline_reason}` : ''}`
-                                : 'Auto-expired (deadline passed)')
-                            : (a.comment || '—');
-                          return (
-                            <tr key={i} style={{ opacity: isInactive ? 0.55 : 1 }}>
-                              <td>{a.reviewer_snapshot?.username || `#${a.reviewer_id}`}</td>
-                              <td><span className={`dashboard-risk-badge ${statusCls}`}>{a.assignment_status}</span></td>
-                              <td>{a.vote ? <span className={`dashboard-risk-badge ${a.vote === 'pass' ? 'low' : 'high'}`}>{a.vote}</span> : <span style={{ color: '#94a3b8' }}>—</span>}</td>
-                              <td style={{ maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                  title={commentCell}>{commentCell}</td>
-                              <td>{a.conflict_flag ? <span style={{ color: '#f59e0b', fontSize: '11px' }}>⚠ Yes</span> : '—'}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                    <div>
+                      {detailModal.assignments.map((a, i) => (
+                        <ReviewerPanelCard
+                          key={a.assignment_id || a.reviewer_id || i}
+                          assignment={a}
+                          index={i}
+                        />
+                      ))}
+                    </div>
                   )}
                 </>
               )}
             </div>
             <div className="dashboard-modal-footer">
-              {/* Block 6: Approve/Reject for awaiting_admin (and pre-quorum override) */}
+              {/* Block 6: Approve/Reject for awaiting_admin (and override
+                  before the panel has finished voting). Styled as
+                  outline-with-tinted-hover buttons via the new
+                  `dashboard-modal-btn-success` / `dashboard-modal-btn-reject`
+                  variants — see `dashboard.css`. */}
               {detailModal && !detailModal.error
                 && detailModal.review_status
                 && !['approved', 'rejected'].includes(detailModal.review_status) && (
                 <>
                   <button
-                    className="dashboard-modal-btn"
-                    style={{ background: '#10b981', color: '#fff', borderColor: '#10b981' }}
+                    className="dashboard-modal-btn dashboard-modal-btn-success"
                     onClick={() => openDecisionModal('approve', detailModal)}
                   >
                     Approve & Promote
                   </button>
                   <button
-                    className="dashboard-modal-btn"
-                    style={{ background: '#dc2626', color: '#fff', borderColor: '#dc2626' }}
+                    className="dashboard-modal-btn dashboard-modal-btn-reject"
                     onClick={() => openDecisionModal('reject', detailModal)}
                   >
                     Reject
@@ -567,7 +919,7 @@ function ReviewQueue() {
                   background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '6px',
                   padding: '8px 10px', fontSize: '12px', color: '#92400e', marginBottom: '14px'
                 }}>
-                  ⚠ This request hasn’t reached panel quorum yet (status: <strong>{decisionModal.reviewStatus}</strong>).
+                  ⚠ The reviewer panel hasn’t finished voting yet (status: <strong>{decisionModal.reviewStatus}</strong>).
                   A reason is required to override.
                 </div>
               )}
@@ -643,13 +995,12 @@ function ReviewQueue() {
                 Cancel
               </button>
               <button
-                className="dashboard-modal-btn"
-                style={{
-                  background: decisionModal.mode === 'approve' ? '#10b981' : '#dc2626',
-                  color: '#fff',
-                  borderColor: decisionModal.mode === 'approve' ? '#10b981' : '#dc2626',
-                  opacity: decisionSubmitting ? 0.6 : 1,
-                }}
+                className={
+                  'dashboard-modal-btn ' +
+                  (decisionModal.mode === 'approve'
+                    ? 'dashboard-modal-btn-success'
+                    : 'dashboard-modal-btn-reject')
+                }
                 onClick={submitDecision}
                 disabled={decisionSubmitting}
               >

@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from ..utils.database import get_db_connection
 
 
@@ -531,7 +531,7 @@ class Submission:
                 WHERE r.application_status = 'approved'
                   AND r.revoked_at IS NULL
                   AND u.role = 'reviewer'
-                  AND u.status != 'blocked'
+                  AND u.status NOT IN ('blocked', 'paused')
             ''')
             all_reviewers = [dict(row) for row in cursor.fetchall()]
 
@@ -593,11 +593,13 @@ class Submission:
 
             selected = candidates[:count]
 
-            # 4. Quorum check
+            # 4. Minimum-pool check
             # Count active assignments that already exist on this submission
             # (assigned/accepted/voted — exclude declined/expired). When we are
             # backfilling (count < REVIEWERS_PER_REQUEST), a single new pick
             # may be enough if the total active pool >= MIN_REVIEWERS_PER_REQUEST.
+            # Below this floor we cannot open / sustain a panel, so the
+            # submission is flipped to 'insufficient_pool'.
             existing_active = sum(
                 1 for e in existing_votes
                 if e.get('assignment_status') in ('assigned', 'accepted', 'voted')
@@ -689,7 +691,17 @@ class Submission:
         """
         Submit a pass/fail vote for a reviewer's assignment.
         Wrapped in BEGIN IMMEDIATE; re-reads live counts atomically.
-        Transitions review_status to 'awaiting_admin' when majority reached.
+
+        Panel state semantics:
+          * Every assigned, non-declined / non-expired reviewer is allowed to
+            cast a vote — the panel does NOT short-circuit on a running tally.
+          * `review_status` only transitions to `'awaiting_admin'` once ALL
+            active assignments have a final state (`voted`). Until then it
+            stays in `'under_review'` (or `'assigned'` for the very first
+            vote that hasn't moved the panel yet).
+          * `review_outcome` is computed from the pass/fail tally and is only
+            written once the panel is complete. Ties are recorded as `'fail'`
+            (conservative default — admin can still override).
         """
         from ...config import (FAIL_REASON_TAXONOMY, FAIL_COMMENT_MIN_LEN,
                                COMMENT_MAX_LEN, MIN_REVIEWERS_PER_REQUEST)
@@ -729,6 +741,12 @@ class Submission:
                 raise ValueError('Submission not found')
 
             row = dict(row)
+            # Distinguish terminal admin-closed state (approved/rejected)
+            # from genuinely pre-open / mid-flight states so the API layer
+            # can surface a clear, actionable message instead of the
+            # ambiguous "not currently under review".
+            if row['review_status'] in ('approved', 'rejected'):
+                raise ValueError('REVIEW_CLOSED_BY_ADMIN')
             if row['review_status'] not in ('assigned', 'under_review'):
                 raise ValueError('This submission is not currently under review')
 
@@ -771,19 +789,25 @@ class Submission:
             # Recompute live tallies
             pass_count = sum(1 for e in votes if e.get('vote') == 'pass')
             fail_count = sum(1 for e in votes if e.get('vote') == 'fail')
-            total_assigned = len([e for e in votes
-                                  if e.get('assignment_status') not in ('declined', 'expired')])
+            active_entries = [e for e in votes
+                              if e.get('assignment_status') not in ('declined', 'expired')]
+            total_assigned = len(active_entries)
 
-            # Majority detection
-            majority_threshold = (total_assigned // 2) + 1
+            # Panel-completion detection: all reviewers on the active roster
+            # must have a final 'voted' status before we hand the request
+            # over to the admin. We deliberately do NOT short-circuit on a
+            # running pass/fail tally — every reviewer's feedback is
+            # collected first so the admin sees the full audit trail.
+            voted_count = sum(1 for e in active_entries
+                              if e.get('assignment_status') == 'voted')
+
             new_status = row['review_status']
             review_outcome = None
-            if pass_count >= majority_threshold:
+            if total_assigned > 0 and voted_count >= total_assigned:
                 new_status = 'awaiting_admin'
-                review_outcome = 'pass'
-            elif fail_count >= majority_threshold:
-                new_status = 'awaiting_admin'
-                review_outcome = 'fail'
+                # Pick the winning side from the final tally. Ties resolve
+                # to 'fail' as a conservative default — admin can override.
+                review_outcome = 'pass' if pass_count > fail_count else 'fail'
             else:
                 new_status = 'under_review'
 
@@ -901,6 +925,11 @@ class Submission:
         """
         Reviewer transitions their assignment from 'assigned' -> 'accepted'.
         Rejects from any other state with a clear ValueError.
+
+        Closed-panel guard: if the admin has already finalized this
+        submission (`review_status` in {'approved','rejected'}) we raise
+        `REVIEW_CLOSED_BY_ADMIN` before touching the JSON. Without this
+        guard, accepting silently mutated archived rows.
         """
         from datetime import datetime, timezone
         conn = get_db_connection()
@@ -916,6 +945,9 @@ class Submission:
                 raise ValueError('Submission not found')
 
             row = dict(row)
+            if row['review_status'] in ('approved', 'rejected'):
+                raise ValueError('REVIEW_CLOSED_BY_ADMIN')
+
             votes = json.loads(row['review_votes'] or '[]')
 
             entry_idx = None
@@ -928,6 +960,9 @@ class Submission:
 
             entry = votes[entry_idx]
             current_status = entry.get('assignment_status')
+            if current_status == 'cancelled':
+                # Belt-and-braces: per-entry cancellation also blocks accept.
+                raise ValueError('REVIEW_CLOSED_BY_ADMIN')
             if current_status == 'accepted':
                 # Idempotent — no-op
                 conn.commit()
@@ -955,14 +990,34 @@ class Submission:
             conn.close()
 
     @staticmethod
-    def decline_assignment(submission_id, reviewer_id, decline_reason=None):
+    def decline_assignment(submission_id, reviewer_id, decline_reason=None, decline_reason_category=None):
         """
         Reviewer transitions their assignment 'assigned'|'accepted' -> 'declined',
-        captures an optional decline_reason (<= DECLINE_REASON_MAX_LEN), then
-        synchronously calls assign_many(submission_id, 1) to backfill the slot
-        from the remaining eligible pool.
+        captures an optional decline_reason (<= DECLINE_REASON_MAX_LEN) and a
+        structured `decline_reason_category` (one of `DECLINE_REASON_TAXONOMY`),
+        evaluates the rolling-window pause threshold inside the same
+        `BEGIN IMMEDIATE`, and then synchronously calls
+        assign_many(submission_id, 1) to backfill the slot from the remaining
+        eligible pool.
+
+        Closed-panel guard: if the admin has already finalized this
+        submission (`review_status` in {'approved','rejected'}) we raise
+        `REVIEW_CLOSED_BY_ADMIN` BEFORE the JSON mutation AND before the
+        synchronous `assign_many` backfill. Without this guard, declining
+        an already-finalized submission would pull a fresh reviewer into
+        a closed panel — giving them the same dead-end experience.
+
+        Auto-pause (decline-handling accountability layer): after writing
+        the declined entry, `Reviewer._evaluate_and_apply_pause(cursor,
+        reviewer_id)` is called inside the same transaction. If the
+        reviewer's rolling-window countable-decline count crosses
+        `REVIEWER_DECLINE_HARD_LIMIT`, their `users.status` flips to
+        'paused' and `reviewers.paused_at`/`paused_until`/`paused_reason`
+        are stamped — atomically with the JSON mutation, so two
+        near-simultaneous declines can't both slip past the flip.
+        See .junie/plans/decline-handling-implementation.md.
         """
-        from ...config import DECLINE_REASON_MAX_LEN
+        from ...config import DECLINE_REASON_MAX_LEN, DECLINE_REASON_TAXONOMY
         from datetime import datetime, timezone
 
         if decline_reason is not None:
@@ -972,7 +1027,19 @@ class Submission:
                     f'decline_reason exceeds {DECLINE_REASON_MAX_LEN} characters'
                 )
 
+        # Validate the structured category. Missing/None is allowed and is
+        # stored as 'unspecified', which the aggregation treats as countable
+        # (matches the legacy behaviour for entries without the field).
+        if decline_reason_category is not None:
+            decline_reason_category = (decline_reason_category or '').strip().lower()
+            if decline_reason_category == '':
+                decline_reason_category = None
+            elif decline_reason_category not in DECLINE_REASON_TAXONOMY:
+                raise ValueError('INVALID_DECLINE_CATEGORY')
+        category_to_store = decline_reason_category or 'unspecified'
+
         conn = get_db_connection()
+        pause_result = ('ok', 0)
         try:
             conn.execute('BEGIN IMMEDIATE')
             cursor = conn.cursor()
@@ -985,6 +1052,9 @@ class Submission:
                 raise ValueError('Submission not found')
 
             row = dict(row)
+            if row['review_status'] in ('approved', 'rejected'):
+                raise ValueError('REVIEW_CLOSED_BY_ADMIN')
+
             votes = json.loads(row['review_votes'] or '[]')
 
             entry_idx = None
@@ -997,6 +1067,8 @@ class Submission:
 
             entry = votes[entry_idx]
             current_status = entry.get('assignment_status')
+            if current_status == 'cancelled':
+                raise ValueError('REVIEW_CLOSED_BY_ADMIN')
             if current_status not in ('assigned', 'accepted'):
                 raise ValueError(
                     f"Cannot decline from status '{current_status}'"
@@ -1006,12 +1078,23 @@ class Submission:
             entry['assignment_status'] = 'declined'
             entry['declined_at'] = now_str
             entry['decline_reason'] = decline_reason or None
+            entry['decline_reason_category'] = category_to_store
+            # Initialize waive flags so the JSON shape is stable. Admin can
+            # later flip `waived: true` via Submission.waive_decline_event.
+            entry.setdefault('waived', False)
+            entry.setdefault('waived_by', None)
+            entry.setdefault('waived_at', None)
             votes[entry_idx] = entry
 
             cursor.execute(
                 'UPDATE submissions SET review_votes = ? WHERE id = ?',
                 (json.dumps(votes), submission_id)
             )
+
+            # Evaluate threshold + apply pause inside the same transaction.
+            # Returns ('paused' | 'soft_warning' | 'ok', countable_declines).
+            pause_result = Reviewer._evaluate_and_apply_pause(cursor, reviewer_id)
+
             conn.commit()
         except Exception:
             conn.rollback()
@@ -1019,13 +1102,220 @@ class Submission:
         finally:
             conn.close()
 
+        # Post-commit notification side effects. Keeping these out of the
+        # transaction matches the rest of the codebase (notifications use
+        # their own short connections and shouldn't block the decline path
+        # on lock contention).
+        verdict, countable = pause_result
+        try:
+            if verdict == 'paused':
+                Notification.create(
+                    reviewer_id,
+                    'Reviewer account paused',
+                    (
+                        f"Your reviewer account has been automatically paused after "
+                        f"{countable} countable declines in the rolling window. You "
+                        f"will not receive new assignments until the window rolls "
+                        f"over or an admin unpauses you. Existing assignments are "
+                        f"unaffected."
+                    ),
+                    type='warning',
+                )
+                # Notify every admin so the auto-pause is visible without a
+                # dashboard refresh. Use a short query for the admin lookup.
+                admin_conn = get_db_connection()
+                try:
+                    admin_rows = admin_conn.execute(
+                        "SELECT id FROM users WHERE role = 'admin'"
+                    ).fetchall()
+                finally:
+                    admin_conn.close()
+                for ar in admin_rows:
+                    try:
+                        Notification.create(
+                            ar['id'],
+                            'Reviewer auto-paused',
+                            (
+                                f"Reviewer user_id={reviewer_id} was auto-paused "
+                                f"after {countable} countable declines in the "
+                                f"rolling window."
+                            ),
+                            type='warning',
+                        )
+                    except Exception:
+                        # Notification failures must never break the decline
+                        # path.
+                        pass
+            elif verdict == 'soft_warning':
+                Notification.create(
+                    reviewer_id,
+                    'Decline-threshold warning',
+                    (
+                        f"You have accumulated {countable} countable declines in "
+                        f"the rolling window. Crossing the hard limit will pause "
+                        f"your reviewer account."
+                    ),
+                    type='info',
+                )
+        except Exception:
+            # Defensive: never let notification I/O fail the decline.
+            pass
+
         # Synchronously backfill from the remaining pool. assign_many opens its
         # own connection and excludes anyone already in review_votes (including
-        # the just-declined reviewer), so duplicates are impossible.
+        # the just-declined reviewer), so duplicates are impossible. If the
+        # reviewer was just auto-paused, they are now also excluded by the
+        # widened `u.status NOT IN ('blocked','paused')` predicate — which can
+        # legitimately collapse the panel to `insufficient_pool`. The
+        # `pool_breakdown` written by assign_many surfaces this to admins.
         backfill = Submission.assign_many(submission_id, count=1)
         return {
             'assignment_status': 'declined',
             'backfill': backfill,
+            'pause_verdict': verdict,
+            'countable_declines': countable,
+        }
+
+    @staticmethod
+    def waive_decline_event(submission_id, reviewer_id, admin_id):
+        """Admin marks a single decline JSON entry as waived.
+
+        Locates the matching declined entry inside `submissions.review_votes`
+        and flips `waived=true`, stamping `waived_by` and `waived_at`. Then
+        re-evaluates the reviewer's pause state inside the same
+        transaction so a waiver that drops the count below
+        `REVIEWER_DECLINE_HARD_LIMIT` can immediately auto-unpause the
+        reviewer.
+
+        Returns a dict:
+            {
+              'submission_id', 'reviewer_id',
+              'waived': True,
+              'pause_verdict': 'paused'|'soft_warning'|'ok'|'unpaused',
+              'countable_declines': int,
+            }
+        Raises `ValueError('NOT_FOUND')` if no matching declined entry
+        exists, `ValueError('ALREADY_WAIVED')` if the entry is already
+        waived.
+        """
+        from ...config import REVIEWER_DECLINE_HARD_LIMIT
+
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT review_votes FROM submissions WHERE id = ?',
+                (submission_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError('Submission not found')
+            votes = json.loads((row['review_votes'] or '[]'))
+
+            target = None
+            for entry in votes:
+                if (entry.get('reviewer_id') == reviewer_id
+                        and entry.get('assignment_status') == 'declined'):
+                    target = entry
+                    break
+            if target is None:
+                raise ValueError('NOT_FOUND')
+            if target.get('waived'):
+                raise ValueError('ALREADY_WAIVED')
+
+            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            target['waived']    = True
+            target['waived_by'] = admin_id
+            target['waived_at'] = now_str
+
+            cursor.execute(
+                'UPDATE submissions SET review_votes = ? WHERE id = ?',
+                (json.dumps(votes), submission_id),
+            )
+
+            # Re-evaluate. If the reviewer was auto-paused and the waiver
+            # drops them below HARD_LIMIT, flip them back to active inside
+            # the same transaction so the admin's action is atomic.
+            cursor.execute(
+                'SELECT paused_at, paused_reason FROM reviewers WHERE user_id = ?',
+                (reviewer_id,),
+            )
+            rev_row = cursor.fetchone()
+            was_auto_paused = bool(
+                rev_row
+                and rev_row['paused_at']
+                and (rev_row['paused_reason'] or '').startswith('auto:')
+            )
+
+            counts = Reviewer._aggregate_assignment_counts(
+                reviewer_id, conn=conn,
+            )
+            countable = counts['countable_declines']
+
+            unpaused_now = False
+            if was_auto_paused and countable < REVIEWER_DECLINE_HARD_LIMIT:
+                cursor.execute(
+                    '''
+                    UPDATE reviewers SET
+                        paused_at          = NULL,
+                        paused_by          = NULL,
+                        paused_reason      = NULL,
+                        paused_until       = NULL,
+                        last_pause_eval_at = ?
+                    WHERE user_id = ?
+                    ''',
+                    (
+                        datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+                        reviewer_id,
+                    ),
+                )
+                cursor.execute(
+                    "UPDATE users SET status = 'active' WHERE id = ? AND status = 'paused'",
+                    (reviewer_id,),
+                )
+                unpaused_now = True
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        # Best-effort notifications post-commit.
+        try:
+            Notification.create(
+                reviewer_id,
+                'Decline event waived',
+                (
+                    'An administrator has waived one of your decline events. '
+                    'It no longer counts toward the pause threshold.'
+                ),
+                type='info',
+            )
+            if unpaused_now:
+                Notification.create(
+                    reviewer_id,
+                    'Reviewer account reactivated',
+                    (
+                        'After the waiver, your countable decline count has '
+                        'dropped below the threshold. Your reviewer account '
+                        'is active again.'
+                    ),
+                    type='info',
+                )
+        except Exception:
+            pass
+
+        return {
+            'submission_id':     submission_id,
+            'reviewer_id':       reviewer_id,
+            'waived':            True,
+            'pause_verdict':     'unpaused' if unpaused_now else (
+                                    'paused' if was_auto_paused else 'ok'
+                                 ),
+            'countable_declines': countable,
         }
 
     @staticmethod
@@ -1118,23 +1408,33 @@ class Submission:
 
         decision: 'approve' or 'reject'.
         reason  : optional free-form audit note. REQUIRED when admin overrides
-                  before quorum (review_status not in awaiting_admin / under_review).
+                  before the panel has finished voting (review_status not in
+                  awaiting_admin).
         title   : (approve only) admin-supplied paper title for the new
                   papers row.
         author  : (approve only) admin-supplied author name.
         force   : (approve only) bypass DUPLICATE_PAPER guard.
 
+        Side-effects (in the same write transaction as the status flip):
+          * Every still-in-flight reviewer assignment (assignment_status
+            in {'assigned','accepted'}) on this submission is closed by
+            setting assignment_status='cancelled', cancelled_at=<now>,
+            and cancellation_reason='admin_finalized_<approve|reject>'.
+            This guarantees no reviewer is left with a phantom row in
+            their queue after the admin closes the panel.
+
         Returns dict:
-          - on approve: { decision, review_status='approved', paper_id,
-                          content_hash }
-          - on reject : { decision, review_status='rejected' }
+          - on approve: { decision, review_status='approved',
+                          cancelled_assignments, paper_id, content_hash }
+          - on reject : { decision, review_status='rejected',
+                          cancelled_assignments }
 
         Raises ValueError with one of:
           'INVALID_DECISION'             — decision not in approve/reject
           'SUBMISSION_NOT_FOUND'
           'NO_REVIEW_REQUEST'            — submission has no review_status set
           'ALREADY_DECIDED'              — already approved/rejected
-          'OVERRIDE_REASON_REQUIRED'     — overriding pre-quorum without reason
+          'OVERRIDE_REASON_REQUIRED'     — overriding before the panel has finished voting, without a reason
           'DUPLICATE_PAPER'              — content_hash already in corpus (approve)
           'NOT_ELIGIBLE_FOR_PROMOTION'   — submission has no content (approve)
         """
@@ -1159,12 +1459,13 @@ class Submission:
             if current_status in ('approved', 'rejected'):
                 raise ValueError('ALREADY_DECIDED')
 
-            # 'awaiting_admin' is the canonical post-quorum state. Anything
-            # else (pending / assigned / under_review / insufficient_pool)
-            # means admin is overriding before the panel reached majority,
-            # which the plan requires to carry an explicit reason.
-            is_pre_quorum_override = current_status != 'awaiting_admin'
-            if is_pre_quorum_override and not (reason and reason.strip()):
+            # 'awaiting_admin' is the canonical "every reviewer has voted,
+            # panel is closed" state. Anything else (pending / assigned /
+            # under_review / insufficient_pool) means admin is overriding
+            # before the panel has finished voting, which the plan
+            # requires to carry an explicit reason.
+            is_panel_incomplete_override = current_status != 'awaiting_admin'
+            if is_panel_incomplete_override and not (reason and reason.strip()):
                 raise ValueError('OVERRIDE_REASON_REQUIRED')
 
             # ---- APPROVE: run the Promotion Pipeline FIRST so that if it
@@ -1181,10 +1482,33 @@ class Submission:
                     force=force,
                 )
 
-            # ---- Persist the audit fields + final review_status. ----
+            # ---- Persist the audit fields + final review_status, and
+            # close any still-in-flight reviewer assignments in the SAME
+            # transaction. Without this, reviewers who hadn't voted yet
+            # would see a phantom row in their queue and only discover
+            # the panel was already closed when they tried to vote. ----
             new_status = 'approved' if decision == 'approve' else 'rejected'
+            cancellation_reason = f'admin_finalized_{decision}'
             try:
                 cursor.execute('BEGIN IMMEDIATE')
+
+                # Re-read review_votes inside the write lock so we don't
+                # race with a concurrent accept/decline/vote.
+                vote_row = cursor.execute(
+                    'SELECT review_votes FROM submissions WHERE id = ?',
+                    (submission_id,),
+                ).fetchone()
+                votes = json.loads((vote_row['review_votes'] if vote_row else None) or '[]')
+                from datetime import datetime, timezone
+                cancelled_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                cancelled_count = 0
+                for entry in votes:
+                    if entry.get('assignment_status') in ('assigned', 'accepted'):
+                        entry['assignment_status']   = 'cancelled'
+                        entry['cancelled_at']        = cancelled_at
+                        entry['cancellation_reason'] = cancellation_reason
+                        cancelled_count += 1
+
                 cursor.execute(
                     '''
                     UPDATE submissions
@@ -1192,11 +1516,12 @@ class Submission:
                            admin_decision        = ?,
                            admin_decided_by      = ?,
                            admin_decided_at      = CURRENT_TIMESTAMP,
-                           admin_decision_reason = ?
+                           admin_decision_reason = ?,
+                           review_votes          = ?
                      WHERE id = ?
                     ''',
                     (new_status, new_status, admin_id,
-                     (reason or None), submission_id),
+                     (reason or None), json.dumps(votes), submission_id),
                 )
                 conn.commit()
             except Exception:
@@ -1207,8 +1532,9 @@ class Submission:
                 raise
 
             response = {
-                'decision':        decision,
-                'review_status':   new_status,
+                'decision':              decision,
+                'review_status':         new_status,
+                'cancelled_assignments': cancelled_count,
             }
             if promotion_result is not None:
                 response.update({
@@ -1270,6 +1596,194 @@ class SimilarityResult:
         return results
 
 class Reviewer:
+    # ------------------------------------------------------------------
+    # Decline-handling accountability layer
+    # See .junie/plans/decline-handling-implementation.md
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _aggregate_assignment_counts(reviewer_id, window_days=None, conn=None):
+        """Single-query JSON-scan aggregation of a reviewer's recent assignment
+        outcomes from `submissions.review_votes`.
+
+        Returns a dict:
+            {
+                'declines':           int,  # any declined entry inside the window
+                'countable_declines': int,  # declined + countable category + not waived
+                'expiries':           int,  # expired entries inside the window
+                'votes':              int,  # voted entries (lifetime)
+                'total_assignments':  int,  # lifetime total entries (any status)
+                'window_days':        int,
+            }
+
+        If `conn` is provided, the query reuses that connection (so the
+        aggregation can run inside the caller's transaction). Otherwise a
+        short-lived connection is opened and closed.
+
+        Legacy entries without a `decline_reason_category` are treated as
+        'unspecified' and count toward the threshold at full weight — matches
+        the documented "unknown reason → assume countable" semantics.
+        """
+        from ...config import (REVIEWER_DECLINE_WINDOW_DAYS,
+                                DECLINE_COUNTABLE_CATEGORIES)
+        if window_days is None:
+            window_days = REVIEWER_DECLINE_WINDOW_DAYS
+
+        # Window cutoff as an ISO-8601 string. Compared as text against the
+        # ISO timestamps stored inside `review_votes` (`declined_at`,
+        # `expired_at`). String ordering of ISO-8601 strings is identical to
+        # chronological ordering for our fixed format.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).strftime(
+            '%Y-%m-%dT%H:%M:%SZ'
+        )
+
+        # Build the countable-categories IN-clause dynamically so the tuple in
+        # config remains the single source of truth.
+        countable_placeholders = ','.join('?' * len(DECLINE_COUNTABLE_CATEGORIES))
+
+        sql = f'''
+            WITH window_entries AS (
+                SELECT je.value AS entry
+                FROM submissions s, json_each(s.review_votes) je
+                WHERE s.review_votes IS NOT NULL
+                  AND json_extract(je.value, '$.reviewer_id') = ?
+            )
+            SELECT
+                COALESCE(SUM(CASE
+                    WHEN json_extract(entry, '$.assignment_status') = 'declined'
+                     AND json_extract(entry, '$.declined_at') >= ?
+                    THEN 1 ELSE 0 END), 0) AS declines,
+                COALESCE(SUM(CASE
+                    WHEN json_extract(entry, '$.assignment_status') = 'declined'
+                     AND json_extract(entry, '$.declined_at') >= ?
+                     AND IFNULL(json_extract(entry, '$.waived'), 0) = 0
+                     AND COALESCE(json_extract(entry, '$.decline_reason_category'), 'unspecified')
+                         IN ({countable_placeholders})
+                    THEN 1 ELSE 0 END), 0) AS countable_declines,
+                COALESCE(SUM(CASE
+                    WHEN json_extract(entry, '$.assignment_status') = 'expired'
+                     AND json_extract(entry, '$.expired_at') >= ?
+                    THEN 1 ELSE 0 END), 0) AS expiries,
+                COALESCE(SUM(CASE
+                    WHEN json_extract(entry, '$.assignment_status') = 'voted'
+                    THEN 1 ELSE 0 END), 0) AS votes,
+                COUNT(*) AS total_assignments
+            FROM window_entries
+        '''
+        params = [reviewer_id, cutoff, cutoff, *DECLINE_COUNTABLE_CATEGORIES, cutoff]
+
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_db_connection()
+        try:
+            row = conn.execute(sql, params).fetchone()
+        finally:
+            if owns_conn:
+                conn.close()
+
+        if row is None:
+            return {
+                'declines': 0,
+                'countable_declines': 0,
+                'expiries': 0,
+                'votes': 0,
+                'total_assignments': 0,
+                'window_days': window_days,
+            }
+        return {
+            'declines': int(row['declines'] or 0),
+            'countable_declines': int(row['countable_declines'] or 0),
+            'expiries': int(row['expiries'] or 0),
+            'votes': int(row['votes'] or 0),
+            'total_assignments': int(row['total_assignments'] or 0),
+            'window_days': window_days,
+        }
+
+    @staticmethod
+    def _evaluate_and_apply_pause(cursor, reviewer_id):
+        """Evaluate the rolling-window decline threshold for `reviewer_id` and,
+        if the hard limit is crossed, flip `users.status='paused'` and stamp
+        `reviewers.paused_*` columns — all using the **passed-in cursor** so
+        the caller's `BEGIN IMMEDIATE` transaction wraps both the JSON write
+        and the pause flip atomically.
+
+        Returns:
+            ('paused',         countable_declines)  — hard-limit crossed, status flipped
+            ('soft_warning',   countable_declines)  — soft-limit reached but below hard
+            ('ok',             countable_declines)  — under both limits, or below grace
+
+        Guarded by:
+          - Grace gate: a reviewer with fewer than
+            REVIEWER_DECLINE_GRACE_ASSIGNMENTS lifetime assignments cannot be
+            auto-paused (avoids penalising new reviewers).
+          - Idempotency: if the reviewer is already paused, the pause flip
+            is a no-op (only `last_pause_eval_at` is bumped) but the verdict
+            is still 'paused' so the caller knows to notify.
+        """
+        from ...config import (REVIEWER_DECLINE_HARD_LIMIT,
+                                REVIEWER_DECLINE_SOFT_LIMIT,
+                                REVIEWER_DECLINE_GRACE_ASSIGNMENTS,
+                                REVIEWER_DECLINE_WINDOW_DAYS)
+
+        # Reuse caller's connection via the cursor for the aggregation, so the
+        # query sees uncommitted writes from the same transaction (notably the
+        # just-written declined entry).
+        counts = Reviewer._aggregate_assignment_counts(
+            reviewer_id,
+            window_days=REVIEWER_DECLINE_WINDOW_DAYS,
+            conn=cursor.connection,
+        )
+        countable = counts['countable_declines']
+        total = counts['total_assignments']
+
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+
+        # Always bump the eval anchor so the lazy sweep has a fresh checkpoint.
+        cursor.execute(
+            'UPDATE reviewers SET last_pause_eval_at = ? WHERE user_id = ?',
+            (now_str, reviewer_id),
+        )
+
+        # Inspect current pause state. If already paused, just report
+        # 'paused' — the caller decides whether to re-notify.
+        cursor.execute(
+            'SELECT paused_at FROM reviewers WHERE user_id = ?',
+            (reviewer_id,),
+        )
+        rev_row = cursor.fetchone()
+        already_paused = bool(rev_row and rev_row['paused_at'])
+
+        # Grace gate: brand-new reviewers don't get auto-paused.
+        if total < REVIEWER_DECLINE_GRACE_ASSIGNMENTS:
+            return ('paused' if already_paused else 'ok', countable)
+
+        if countable >= REVIEWER_DECLINE_HARD_LIMIT and not already_paused:
+            paused_until = (now + timedelta(days=REVIEWER_DECLINE_WINDOW_DAYS)).strftime(
+                '%Y-%m-%d %H:%M:%S'
+            )
+            cursor.execute(
+                '''
+                UPDATE reviewers SET
+                    paused_at      = ?,
+                    paused_by      = NULL,
+                    paused_reason  = 'auto:rolling_window_exceeded',
+                    paused_until   = ?
+                WHERE user_id = ?
+                ''',
+                (now_str, paused_until, reviewer_id),
+            )
+            cursor.execute(
+                "UPDATE users SET status = 'paused' WHERE id = ? AND status = 'active'",
+                (reviewer_id,),
+            )
+            return ('paused', countable)
+
+        if already_paused:
+            return ('paused', countable)
+        if countable >= REVIEWER_DECLINE_SOFT_LIMIT:
+            return ('soft_warning', countable)
+        return ('ok', countable)
+
     @staticmethod
     def apply(user_id, institution_domain, institution_name, affiliation, institutional_email, bio, expertise_tags=["CS"]):
         """Create or update a reviewer application.
@@ -1886,6 +2400,247 @@ class Reviewer:
             raise e
         finally:
             conn.close()
+
+    # ------------------------------------------------------------------
+    # Decline-handling accountability layer (Step 4):
+    # manual pause / unpause + lazy auto-unpause sweep.
+    # See .junie/plans/decline-handling-implementation.md.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def sweep_paused_reviewers():
+        """Lazy auto-unpause sweep — idempotent. For every reviewer whose
+        `paused_at` is currently set, recompute the rolling-window countable
+        decline count; if it has dropped below `REVIEWER_DECLINE_HARD_LIMIT`,
+        flip `users.status` back to `'active'` and clear
+        `reviewers.paused_at`/`paused_until`.
+
+        Mirrors the shape of `Submission.expire_overdue_assignments`:
+          - Phase 1 (read): list candidate user_ids inside a short read.
+          - Phase 2 (recompute + write): per reviewer, run the aggregation
+            and, if eligible, flip status inside `BEGIN IMMEDIATE`.
+
+        Returns a list of (user_id, countable_declines) for each reviewer
+        actually flipped back to active.
+
+        Manual pauses (`paused_reason` not starting with 'auto:') are NOT
+        auto-cleared by the sweep — only the admin's explicit `unpause`
+        call clears those.
+        """
+        from ...config import REVIEWER_DECLINE_HARD_LIMIT
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id, paused_reason FROM reviewers WHERE paused_at IS NOT NULL"
+            )
+            candidates = [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+        unpaused = []
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+
+        for cand in candidates:
+            user_id = cand['user_id']
+            reason = cand.get('paused_reason') or ''
+            # Manual pauses are sticky until an admin explicitly unpauses.
+            if not reason.startswith('auto:'):
+                continue
+            counts = Reviewer._aggregate_assignment_counts(user_id)
+            if counts['countable_declines'] >= REVIEWER_DECLINE_HARD_LIMIT:
+                # Still above threshold — keep paused.
+                continue
+
+            inner = get_db_connection()
+            try:
+                inner.execute('BEGIN IMMEDIATE')
+                cur = inner.cursor()
+                cur.execute(
+                    '''
+                    UPDATE reviewers SET
+                        paused_at          = NULL,
+                        paused_by          = NULL,
+                        paused_reason      = NULL,
+                        paused_until       = NULL,
+                        last_pause_eval_at = ?
+                    WHERE user_id = ? AND paused_at IS NOT NULL
+                    ''',
+                    (now_str, user_id),
+                )
+                cur.execute(
+                    "UPDATE users SET status = 'active' WHERE id = ? AND status = 'paused'",
+                    (user_id,),
+                )
+                inner.commit()
+                if cur.rowcount or True:
+                    unpaused.append((user_id, counts['countable_declines']))
+            except Exception:
+                inner.rollback()
+            finally:
+                inner.close()
+
+        # Post-commit: best-effort reviewer-side notification.
+        for user_id, countable in unpaused:
+            try:
+                Notification.create(
+                    user_id,
+                    'Reviewer account reactivated',
+                    (
+                        'Your reviewer account is active again \u2014 your '
+                        'countable decline count has dropped below the '
+                        f'threshold (now {countable}). You will start '
+                        'receiving new assignments again.'
+                    ),
+                    type='info',
+                )
+            except Exception:
+                pass
+
+        return unpaused
+
+    @staticmethod
+    def pause(user_id, admin_id, reason=None):
+        """Admin manual pause for a reviewer.
+
+        Sets `paused_at`/`paused_by`/`paused_reason` on `reviewers`, flips
+        `users.status` to `'paused'`, and writes a `Notification` for the
+        reviewer. Refuses to pause a revoked reviewer or an admin user.
+
+        Idempotent: pausing an already-paused reviewer is a no-op (returns
+        the current paused state). The lazy auto-unpause sweep ignores
+        manual pauses (`paused_reason` does not start with `'auto:'`).
+        """
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, role, status FROM users WHERE id = ?', (user_id,))
+            user_row = cursor.fetchone()
+            if not user_row:
+                raise ValueError('User not found')
+            user_row = dict(user_row)
+            if user_row['role'] == 'admin':
+                raise ValueError('Cannot pause an admin user')
+
+            cursor.execute(
+                'SELECT user_id, revoked_at, paused_at FROM reviewers WHERE user_id = ?',
+                (user_id,),
+            )
+            rev_row = cursor.fetchone()
+            if not rev_row:
+                raise ValueError('Reviewer record not found')
+            rev_row = dict(rev_row)
+            if rev_row.get('revoked_at'):
+                raise ValueError('Cannot pause a revoked reviewer')
+            if rev_row.get('paused_at'):
+                return {'status': 'already_paused', 'user_id': user_id}
+
+            now = datetime.now(timezone.utc)
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+            stored_reason = (reason or '').strip() or 'manual:admin_paused'
+
+            conn.execute('BEGIN IMMEDIATE')
+            cursor.execute(
+                '''
+                UPDATE reviewers SET
+                    paused_at          = ?,
+                    paused_by          = ?,
+                    paused_reason      = ?,
+                    paused_until       = NULL,
+                    last_pause_eval_at = ?
+                WHERE user_id = ?
+                ''',
+                (now_str, admin_id, stored_reason, now_str, user_id),
+            )
+            cursor.execute(
+                "UPDATE users SET status = 'paused' WHERE id = ? AND status = 'active'",
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        try:
+            Notification.create(
+                user_id,
+                'Reviewer account paused',
+                (
+                    'An administrator has paused your reviewer account. '
+                    'You will not receive new assignments until you are '
+                    'unpaused.'
+                    + (f' Reason: {reason}' if reason else '')
+                ),
+                type='warning',
+            )
+        except Exception:
+            pass
+
+        return {'status': 'paused', 'user_id': user_id, 'paused_by': admin_id,
+                'paused_reason': stored_reason}
+
+    @staticmethod
+    def unpause(user_id, admin_id):
+        """Admin manual unpause for a reviewer.
+
+        Clears `paused_at`/`paused_by`/`paused_reason`/`paused_until` and
+        flips `users.status` back to `'active'`. Writes a notification.
+
+        Idempotent: unpausing an active reviewer is a no-op (returns the
+        current state).
+        """
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT user_id, paused_at FROM reviewers WHERE user_id = ?',
+                (user_id,),
+            )
+            rev_row = cursor.fetchone()
+            if not rev_row:
+                raise ValueError('Reviewer record not found')
+            rev_row = dict(rev_row)
+            if not rev_row.get('paused_at'):
+                return {'status': 'already_active', 'user_id': user_id}
+
+            now = datetime.now(timezone.utc)
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+
+            conn.execute('BEGIN IMMEDIATE')
+            cursor.execute(
+                '''
+                UPDATE reviewers SET
+                    paused_at          = NULL,
+                    paused_by          = NULL,
+                    paused_reason      = NULL,
+                    paused_until       = NULL,
+                    last_pause_eval_at = ?
+                WHERE user_id = ?
+                ''',
+                (now_str, user_id),
+            )
+            cursor.execute(
+                "UPDATE users SET status = 'active' WHERE id = ? AND status = 'paused'",
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        try:
+            Notification.create(
+                user_id,
+                'Reviewer account reactivated',
+                (
+                    'An administrator has reactivated your reviewer account. '
+                    'You will start receiving new assignments again.'
+                ),
+                type='info',
+            )
+        except Exception:
+            pass
+
+        return {'status': 'active', 'user_id': user_id, 'unpaused_by': admin_id}
 
 class Institution:
     @staticmethod

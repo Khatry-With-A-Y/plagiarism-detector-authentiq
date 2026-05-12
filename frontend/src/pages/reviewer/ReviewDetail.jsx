@@ -352,14 +352,24 @@ function DeadlinePill({ deadlineAt }) {
   );
 }
 
+// Decline-reason taxonomy — keep in sync with backend/config.py::DECLINE_REASON_TAXONOMY.
+// The two `excluded` entries do NOT count toward the rolling-window pause threshold.
+const DECLINE_REASON_CATEGORIES = [
+  { value: 'conflict_of_interest', label: 'Conflict of Interest', excluded: true },
+  { value: 'out_of_expertise',     label: 'Out of My Expertise',  excluded: true },
+  { value: 'workload',             label: 'Workload too high',     excluded: false },
+  { value: 'unavailable',          label: 'Unavailable this week', excluded: false },
+  { value: 'other',                label: 'Other (please explain)', excluded: false },
+];
+
 function ActionPanel(props) {
   const {
     assignment, isReadOnly, isAssigned, isInactive, alreadyVoted, showVoting,
     voteSuccess, selectedVote, comment, failReasons,
-    showDecline, declineReason,
+    showDecline, declineReason, declineReasonCategory,
     submitting, voteError,
     lifecycleBusy, lifecycleError,
-    setShowDecline, setDeclineReason,
+    setShowDecline, setDeclineReason, setDeclineReasonCategory,
     setSelectedVote, setComment, toggleFailReason,
     handleAccept, handleDecline, handleSubmitVote,
     canSubmit,
@@ -400,14 +410,27 @@ function ActionPanel(props) {
           background: '#f8fafc',
         }}>
           <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b', marginBottom: '8px' }}>
-            Assignment {status === 'declined' ? 'Declined' : 'Expired'}
+            Assignment {status === 'declined'
+              ? 'Declined'
+              : status === 'expired'
+                ? 'Expired'
+                : 'Closed by Admin'}
           </h3>
           <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
             {status === 'declined'
               ? 'You declined this assignment. A replacement reviewer has been notified.'
-              : 'The deadline has passed and this assignment expired. A replacement reviewer has been notified.'}
-            {assignment?.decline_reason && (
+              : status === 'expired'
+                ? 'The deadline has passed and this assignment expired. A replacement reviewer has been notified.'
+                : 'The admin has already finalized this submission, so reviewer voting is closed. No action is required from you.'}
+            {status === 'declined' && assignment?.decline_reason && (
               <> Reason: <em>{assignment.decline_reason}</em></>
+            )}
+            {status === 'cancelled' && assignment?.cancellation_reason && (
+              <> Reason: <em>{assignment.cancellation_reason === 'admin_finalized_approve'
+                              ? 'submission was approved by the admin'
+                              : assignment.cancellation_reason === 'admin_finalized_reject'
+                                ? 'submission was rejected by the admin'
+                                : assignment.cancellation_reason}</em></>
             )}
           </p>
         </div>
@@ -465,6 +488,41 @@ function ActionPanel(props) {
             </div>
           ) : (
             <div>
+              {/* Decline-handling accountability layer: required structured
+                  category. `conflict_of_interest` and `out_of_expertise` do
+                  NOT count toward the rolling-window pause threshold. */}
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
+                Why are you declining? <span style={{ color: '#dc2626' }}>*</span>
+              </label>
+              <select
+                value={declineReasonCategory || ''}
+                onChange={e => setDeclineReasonCategory(e.target.value || null)}
+                disabled={lifecycleBusy}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #e5e7eb',
+                  fontSize: '13px',
+                  background: '#fff',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  marginBottom: '6px',
+                }}
+              >
+                <option value="" disabled>Select a reason…</option>
+                {DECLINE_REASON_CATEGORIES.map(cat => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}{cat.excluded ? ' — does not count toward pause threshold' : ''}
+                  </option>
+                ))}
+              </select>
+              <p style={{ fontSize: '11px', color: '#64748b', margin: '0 0 12px' }}>
+                <em>Conflict of Interest</em> and <em>Out of My Expertise</em> are
+                considered legitimate declines and are excluded from the pause
+                threshold.
+              </p>
+
               <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
                 Reason for declining (optional, max 500 characters)
               </label>
@@ -493,22 +551,23 @@ function ActionPanel(props) {
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                 <button
                   onClick={handleDecline}
-                  disabled={lifecycleBusy}
+                  disabled={lifecycleBusy || !declineReasonCategory}
+                  title={!declineReasonCategory ? 'Please select a reason category before confirming.' : undefined}
                   style={{
                     padding: '10px 24px',
                     borderRadius: '8px',
                     border: 'none',
-                    background: lifecycleBusy ? '#94a3b8' : '#dc2626',
+                    background: (lifecycleBusy || !declineReasonCategory) ? '#94a3b8' : '#dc2626',
                     color: '#fff',
                     fontWeight: 600,
                     fontSize: '14px',
-                    cursor: lifecycleBusy ? 'not-allowed' : 'pointer',
+                    cursor: (lifecycleBusy || !declineReasonCategory) ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {lifecycleBusy ? 'Declining…' : 'Confirm Decline'}
                 </button>
                 <button
-                  onClick={() => { setShowDecline(false); setDeclineReason(''); }}
+                  onClick={() => { setShowDecline(false); setDeclineReason(''); setDeclineReasonCategory(null); }}
                   disabled={lifecycleBusy}
                   style={{
                     padding: '10px 24px',
@@ -736,6 +795,9 @@ export default function ReviewDetail() {
   const [lifecycleError, setLifecycleError] = useState(null);
   const [showDecline, setShowDecline] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
+  // Decline-handling accountability layer: structured decline category.
+  // Required by the UI; legitimate categories don't count toward the pause threshold.
+  const [declineReasonCategory, setDeclineReasonCategory] = useState(null);
 
   // Stage 3: document-pane tab state. The PDF blob is fetched lazily on the
   // first time the reviewer activates the PDF tab and revoked on unmount /
@@ -787,17 +849,33 @@ export default function ReviewDetail() {
 
   const handleDecline = async () => {
     if (declineReason.length > 500) return;
+    // Defensive: the Confirm button is already disabled until a category is
+    // picked, but this guard ensures programmatic / keyboard fast-paths
+    // can't bypass it.
+    if (!declineReasonCategory) {
+      setLifecycleError('Please select a reason category before confirming.');
+      return;
+    }
     setLifecycleBusy(true);
     setLifecycleError(null);
     try {
-      await reviewsAPI.declineAssignment(Number(submissionId), declineReason.trim() || null);
+      await reviewsAPI.declineAssignment(
+        Number(submissionId),
+        declineReason.trim() || null,
+        declineReasonCategory,
+      );
       // Block 7: notify the navbar badge so it updates immediately.
       window.dispatchEvent(new Event('reviews:summary-refresh'));
       // After declining, the reviewer no longer has access; bounce back to the
       // main dashboard with the navbar's "My Reviews" tab pre-selected.
       navigate('/dashboard', { state: { openTab: 'reviewer-work' } });
     } catch (err) {
-      setLifecycleError(err.response?.data?.error || 'Failed to decline assignment.');
+      const code = err.response?.data?.code;
+      if (code === 'INVALID_DECLINE_CATEGORY') {
+        setLifecycleError('That decline reason is not recognised. Please pick one from the list.');
+      } else {
+        setLifecycleError(err.response?.data?.error || 'Failed to decline assignment.');
+      }
       setLifecycleBusy(false);
     }
   };
@@ -1049,7 +1127,12 @@ export default function ReviewDetail() {
   const alreadyVoted = status === 'voted' || voteSuccess;
   const isAccepted   = status === 'accepted';
   const isAssigned   = status === 'assigned';
-  const isInactive   = status === 'declined' || status === 'expired';
+  // 'cancelled' = admin force-promoted/rejected the submission before the
+  // reviewer voted. Treat it as a terminal/inactive state alongside
+  // declined/expired so the panel renders a clear closure notice instead
+  // of an active vote form (the backend now also rejects vote/accept/decline
+  // with 'REVIEW_CLOSED_BY_ADMIN').
+  const isInactive   = status === 'declined' || status === 'expired' || status === 'cancelled';
   // Voting UI is only available once the reviewer has explicitly accepted.
   const showVoting = !isReadOnly && !alreadyVoted && isAccepted;
   // Stage 3: declined/expired reviewers should not stream the original file
@@ -1106,12 +1189,14 @@ export default function ReviewDetail() {
             failReasons={failReasons}
             showDecline={showDecline}
             declineReason={declineReason}
+            declineReasonCategory={declineReasonCategory}
             submitting={submitting}
             voteError={voteError}
             lifecycleBusy={lifecycleBusy}
             lifecycleError={lifecycleError}
             setShowDecline={setShowDecline}
             setDeclineReason={setDeclineReason}
+            setDeclineReasonCategory={setDeclineReasonCategory}
             setSelectedVote={setSelectedVoteAndReset}
             setComment={setComment}
             toggleFailReason={toggleFailReason}

@@ -39,6 +39,10 @@ def serialize_assignment(entry, viewer_role, assignment_index=None):
             'declined_at':       entry.get('declined_at'),
             'expired_at':        entry.get('expired_at'),
             'completed_at':      entry.get('completed_at'),
+            # Admin-cancellation provenance (so the UI can show
+            # "Closed by admin on <date>" instead of a stale 'assigned' row).
+            'cancelled_at':         entry.get('cancelled_at'),
+            'cancellation_reason':  entry.get('cancellation_reason'),
             'vote':              entry.get('vote'),
             'comment':           entry.get('comment'),
             'fail_reasons':      entry.get('fail_reasons'),

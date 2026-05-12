@@ -25,7 +25,12 @@ export const reviewersAPI = {
     }),
 
   getMyApplication: () => api.get('/reviewers/applications/my'),
-  
+
+  // Decline-handling accountability layer: self-scoped behaviour snapshot
+  // used by the reviewer dashboard to render soft-warning / paused banners.
+  // See .junie/plans/decline-handling-implementation.md.
+  getMyBehaviour: () => api.get('/reviewers/me/behaviour'),
+
   adminListApplications: (status, page = 1) => {
     let url = `/reviewers/admin/applications?page=${page}`;
     if (status) url += `&status=${status}`;
@@ -40,6 +45,24 @@ export const reviewersAPI = {
   // assignments stay intact; the user's role flips back to 'user'.
   adminRevoke: (userId, reason) =>
     api.post(`/reviewers/admin/${userId}/revoke`, { reason }),
+
+  // Decline-handling Step 5: admin Reviewer Behaviour aggregation.
+  // Returns one row per approved reviewer with rolling-window decline /
+  // expiry / vote counts plus the configured threshold constants for
+  // badge rendering. See .junie/plans/decline-handling-implementation.md.
+  adminGetReviewerBehaviour: () =>
+    api.get('/reviewers/admin/behaviour'),
+
+  // Step 5: per-reviewer recent decline JSON entries (used by the
+  // expand-row drawer on the Reviewer Behaviour page).
+  adminGetReviewerDeclineEvents: (userId, limit = 20) =>
+    api.get(`/reviewers/admin/${userId}/decline-events?limit=${limit}`),
+
+  // Step 4: admin manual pause / unpause levers.
+  adminPauseReviewer: (userId, reason) =>
+    api.post(`/reviewers/admin/${userId}/pause`, { reason }),
+  adminUnpauseReviewer: (userId) =>
+    api.post(`/reviewers/admin/${userId}/unpause`),
 };
 
 export default reviewersAPI;

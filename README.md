@@ -161,17 +161,16 @@ If `setup.ps1`'s automatic corpus download failed:
 | Reviewer    | `hari`     | Pokhara University (`pu.edu.np`) |
 | Reviewer    | `gita`     | Institute of Engineering (`ioe.edu.np`) |
 | Reviewer    | `bishnu`   | Institute of Engineering (`ioe.edu.np`) |
-| User        | `krishna`  | Owns the seeded review-eligible submission |
+| User        | `krishna`  | — |
 | User        | `radha`    | — |
 | User        | `arjun`    | — |
-| Applicant   | `binod`    | TU; has a pending reviewer application |
 
 ---
 
 ## End-to-end demo
 
-1. **Apply.** Log in as `binod`, click *Apply to be a Reviewer* (or just
-   verify the pending application already exists).
+1. **Apply.** Sign up a new account (or log in as an existing user) and
+   click *Apply to be a Reviewer* to file a pending reviewer application.
 2. **Approve.** Log in as `admin`, open *Reviewer Applications*, approve
    the applicant.
 3. **Submit.** Log in as `krishna`, open the seeded submission, click
@@ -181,9 +180,10 @@ If `setup.ps1`'s automatic corpus download failed:
    `bishnu`) are picked.
 5. **Review.** Log in as each reviewer (`ram` … `bishnu`) → *Accept* →
    vote *Pass* / *Fail* with optional comment + fail-reason chips.
-6. **Decide.** Once majority is reached, as admin click *Approve*. The
-   Promotion Pipeline runs — the submission becomes a `papers` row with
-   `source='peer_reviewed'`.
+6. **Decide.** Once every assigned reviewer has cast a vote, the panel
+   transitions to *Awaiting Admin Decision*. As admin, review the panel
+   tally and click *Approve* (or *Reject*). The Promotion Pipeline runs
+   — the submission becomes a `papers` row with `source='peer_reviewed'`.
 7. **Verify.** Have `radha` upload a paraphrase. The new corpus paper
    appears in the similarity report (proves cache invalidation).
 8. **Submitter view.** Log back in as `krishna`, open the submission —
@@ -199,7 +199,7 @@ If `setup.ps1`'s automatic corpus download failed:
 | Setting | Default | Meaning |
 |---|---|---|
 | `REVIEWERS_PER_REQUEST`        | 5     | Panel size |
-| `MIN_REVIEWERS_PER_REQUEST`    | 3     | Quorum threshold |
+| `MIN_REVIEWERS_PER_REQUEST`    | 3     | Minimum active reviewers required before a panel can open |
 | `REVIEW_DEADLINE_HOURS`        | 72    | Per-assignment deadline |
 | `REVIEW_ELIGIBILITY_THRESHOLD` | 0.20  | Max similarity to be review-eligible |
 | `STRICT_INSTITUTION_EXCLUSION` | True  | Anti-collusion filter on/off |

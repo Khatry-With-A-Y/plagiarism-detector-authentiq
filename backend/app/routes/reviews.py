@@ -1,6 +1,6 @@
 import os
 from flask import Blueprint, request, jsonify, send_file
-from ..models.models import Submission, User, SimilarityResult
+from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification
 from ..utils.auth import require_auth, require_admin, require_reviewer, get_current_user
 from ..utils.serializers import serialize_assignment, serialize_assignment_list
 from datetime import datetime
@@ -86,6 +86,13 @@ def get_admin_queue():
     except Exception:
         # Sweep failure must not break the queue read.
         pass
+    # Decline-handling Step 4: lazy auto-unpause sweep — flips any
+    # auto-paused reviewer whose rolling-window count has dropped below
+    # HARD_LIMIT back to active. Failure must not break the queue read.
+    try:
+        Reviewer.sweep_paused_reviewers()
+    except Exception:
+        pass
 
     status = request.args.get('status')
     page = int(request.args.get('page', 1))
@@ -108,7 +115,7 @@ def get_admin_queue():
 
 
 # ---------------------------------------------------------------------------
-# Block 4 — Assignment, Voting, Majority & Double-Blind
+# Block 4 — Assignment, Voting & Double-Blind
 # ---------------------------------------------------------------------------
 
 @reviews_bp.route('/admin/submissions/<int:submission_id>/assign', methods=['POST'])
@@ -137,7 +144,13 @@ def list_assignments():
 
     Block 7 (Stage 7a): accepts an optional `?status=` query param with one of
     `pending` (assigned|accepted), `completed` (voted), or `declined_expired`
-    (declined|expired). Unknown values are ignored (no filter applied).
+    (declined|expired|cancelled). Unknown values are ignored (no filter
+    applied).
+
+    Note: when no filter is supplied (default view), entries cancelled by an
+    admin force-promote/reject are hidden from the reviewer's queue. They are
+    still reachable via `?status=declined_expired` so the reviewer can audit
+    *why* the assignment disappeared.
     """
     user = get_current_user()
     page = int(request.args.get('page', 1))
@@ -151,6 +164,11 @@ def list_assignments():
         Submission.expire_overdue_assignments()
     except Exception:
         pass
+    # Decline-handling Step 4: lazy auto-unpause sweep alongside expiry.
+    try:
+        Reviewer.sweep_paused_reviewers()
+    except Exception:
+        pass
 
     # Pull a generous page first, then filter in Python — keeps the SQL simple
     # while still giving stable pagination on the client side. Reviewer rosters
@@ -160,7 +178,7 @@ def list_assignments():
     status_buckets = {
         'pending':           ('assigned', 'accepted'),
         'completed':         ('voted',),
-        'declined_expired':  ('declined', 'expired'),
+        'declined_expired':  ('declined', 'expired', 'cancelled'),
     }
     if status_filter in status_buckets:
         bucket = status_buckets[status_filter]
@@ -169,7 +187,14 @@ def list_assignments():
             if (a.get('assignment_status') or '') in bucket
         ]
     else:
-        filtered = data['assignments']
+        # Default (unfiltered) view: hide admin-cancelled entries so the
+        # reviewer's queue isn't cluttered with assignments that were closed
+        # by the admin force-promoting / rejecting. They remain visible
+        # under the `declined_expired` terminal tab for auditability.
+        filtered = [
+            a for a in data['assignments']
+            if (a.get('assignment_status') or '') != 'cancelled'
+        ]
 
     total = len(filtered)
     offset = (page - 1) * limit
@@ -285,6 +310,13 @@ def submit_vote(submission_id):
                 'error': 'You must accept this assignment before voting.',
                 'code': 'MUST_ACCEPT_FIRST'
             }), 400
+        if error_str == 'REVIEW_CLOSED_BY_ADMIN':
+            # Terminal state — the admin has already approved/rejected
+            # this submission, so no further reviewer action is possible.
+            return jsonify({
+                'error': 'The admin has already finalized this submission. Reviewer voting is closed.',
+                'code': 'REVIEW_CLOSED_BY_ADMIN'
+            }), 409
         return jsonify({'error': error_str}), 400
     except Exception as e:
         return jsonify({'error': f'Vote submission failed: {str(e)}'}), 500
@@ -303,7 +335,13 @@ def accept_assignment(submission_id):
         result = Submission.accept_assignment(submission_id, user['id'])
         return jsonify(result), 200
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        code = str(e)
+        if code == 'REVIEW_CLOSED_BY_ADMIN':
+            return jsonify({
+                'error': 'The admin has already finalized this submission. The assignment is closed.',
+                'code': 'REVIEW_CLOSED_BY_ADMIN'
+            }), 409
+        return jsonify({'error': code}), 400
     except Exception as e:
         return jsonify({'error': f'Accept failed: {str(e)}'}), 500
 
@@ -313,18 +351,43 @@ def accept_assignment(submission_id):
 def decline_assignment(submission_id):
     """
     Reviewer declines an assignment ('assigned' or 'accepted' -> 'declined').
-    Optional body: { decline_reason: str (<=500 chars) }.
+    Optional body:
+        {
+            decline_reason: str (<=500 chars),
+            decline_reason_category: one of DECLINE_REASON_TAXONOMY
+        }
+    The structured `decline_reason_category` is required by the UI but the
+    server treats it as optional and defaults to 'unspecified' for legacy
+    callers. Categories `conflict_of_interest` and `out_of_expertise` are
+    excluded from the rolling-window pause threshold.
     Backfill is performed synchronously from the remaining eligible pool.
     """
     user = get_current_user()
     data = request.get_json(silent=True) or {}
     decline_reason = data.get('decline_reason')
+    decline_reason_category = data.get('decline_reason_category')
 
     try:
-        result = Submission.decline_assignment(submission_id, user['id'], decline_reason)
+        result = Submission.decline_assignment(
+            submission_id,
+            user['id'],
+            decline_reason,
+            decline_reason_category=decline_reason_category,
+        )
         return jsonify(result), 200
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        code = str(e)
+        if code == 'REVIEW_CLOSED_BY_ADMIN':
+            return jsonify({
+                'error': 'The admin has already finalized this submission. The assignment is closed.',
+                'code': 'REVIEW_CLOSED_BY_ADMIN'
+            }), 409
+        if code == 'INVALID_DECLINE_CATEGORY':
+            return jsonify({
+                'error': 'Unknown decline_reason_category.',
+                'code': 'INVALID_DECLINE_CATEGORY'
+            }), 400
+        return jsonify({'error': code}), 400
     except Exception as e:
         return jsonify({'error': f'Decline failed: {str(e)}'}), 500
 
@@ -532,7 +595,7 @@ def admin_decide_submission(submission_id):
             'SUBMISSION_NOT_FOUND':       ('Submission not found.', 404),
             'NO_REVIEW_REQUEST':          ('This submission has no peer-review request.', 400),
             'ALREADY_DECIDED':            ('This request has already been decided.', 409),
-            'OVERRIDE_REASON_REQUIRED':   ("A reason is required when overriding a request before the panel reaches quorum.", 400),
+            'OVERRIDE_REASON_REQUIRED':   ("A reason is required when overriding a request before the panel has finished voting.", 400),
             'DUPLICATE_PAPER':            ('A paper with identical content already exists in the corpus. Pass force=true to override.', 409),
             'NOT_ELIGIBLE_FOR_PROMOTION': ('Submission has no content to promote.', 400),
             'SOURCE_FILE_MISSING':        ('Submission file is missing on disk; cannot copy to corpus.', 500),
@@ -565,8 +628,12 @@ def get_assignments_summary():
     assigned_count = sum(1 for a in assignments if a.get('assignment_status') == 'assigned')
     accepted_count = sum(1 for a in assignments if a.get('assignment_status') == 'accepted')
     completed_count = sum(1 for a in assignments if a.get('assignment_status') == 'voted')
+    # 'cancelled' (admin force-promote/reject) is a terminal state — count it
+    # alongside declined/expired so the badge accurately reflects "things
+    # that ended without a vote from me".
     declined_or_expired_count = sum(
-        1 for a in assignments if a.get('assignment_status') in ('declined', 'expired')
+        1 for a in assignments
+        if a.get('assignment_status') in ('declined', 'expired', 'cancelled')
     )
     nearing_deadline_count = sum(
         1 for a in assignments
@@ -594,7 +661,7 @@ def get_admin_requests_summary():
     Returns review-pipeline state at a glance:
       - pending_count:        review_status='pending' (waiting for assignment)
       - assigned_count:       review_status IN ('assigned','under_review')
-      - awaiting_admin_count: panel reached quorum, awaiting admin decide
+      - awaiting_admin_count: panel has finished voting, awaiting admin decide
       - insufficient_pool_count: not enough eligible reviewers
       - nearing_deadline_count: assignments with deadline_at within 12h that
                                 are still 'assigned' or 'accepted'
@@ -662,3 +729,60 @@ def get_admin_requests_summary():
         'insufficient_pool_count': insufficient_pool_count,
         'nearing_deadline_count':  nearing_deadline_count,
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# Decline-handling accountability layer (Step 4):
+# Admin manual waive of a single decline JSON entry inside a submission's
+# review_votes. See .junie/plans/decline-handling-implementation.md.
+# ---------------------------------------------------------------------------
+
+@reviews_bp.route(
+    '/admin/submissions/<int:submission_id>/decline-events/<int:reviewer_id>/waive',
+    methods=['POST'],
+)
+@require_admin
+def waive_decline_event(submission_id, reviewer_id):
+    """Admin marks a single decline JSON entry inside `submissions.review_votes`
+    as waived.
+
+    Effect (atomic, single transaction):
+      - the targeted declined entry gets `waived=true`, `waived_by=admin_id`,
+        `waived_at=now`;
+      - the reviewer's rolling-window countable decline count is recomputed
+        (waived entries are excluded);
+      - if the reviewer was auto-paused and the recompute now drops them
+        below `REVIEWER_DECLINE_HARD_LIMIT`, `users.status` flips back to
+        `'active'` and `reviewers.paused_*` is cleared in the same
+        transaction.
+
+    Returns:
+      200 {submission_id, reviewer_id, waived, pause_verdict, countable_declines}
+      404 NOT_FOUND when no matching declined entry exists
+      409 ALREADY_WAIVED when the entry was previously waived
+    """
+    admin = get_current_user()
+    submission = Submission.get_by_id(submission_id)
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+
+    try:
+        result = Submission.waive_decline_event(
+            submission_id, reviewer_id, admin['id']
+        )
+        return jsonify(result), 200
+    except ValueError as e:
+        code = str(e)
+        if code == 'NOT_FOUND':
+            return jsonify({
+                'error': 'No matching declined assignment found for this reviewer on this submission.',
+                'code':  'NOT_FOUND',
+            }), 404
+        if code == 'ALREADY_WAIVED':
+            return jsonify({
+                'error': 'This decline event has already been waived.',
+                'code':  'ALREADY_WAIVED',
+            }), 409
+        return jsonify({'error': code}), 400
+    except Exception as e:
+        return jsonify({'error': f'Waive failed: {str(e)}'}), 500

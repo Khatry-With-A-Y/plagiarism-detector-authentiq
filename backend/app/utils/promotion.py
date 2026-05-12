@@ -5,16 +5,19 @@ When an admin approves a peer-reviewed submission, this module promotes the
 submission into the corpus deterministically:
 
   1. Read the submission row (must be in `awaiting_admin` with a `pass`
-     review_outcome, unless admin is overriding before quorum — caller's
-     responsibility to enforce).
+     review_outcome, unless admin is overriding before the panel has
+     finished voting — caller's responsibility to enforce).
   2. Compute `content_hash` (sha256 over the canonical content text).
      If a `papers.content_hash` already matches → raise DUPLICATE_PAPER
      (unless force=True).
   3. Copy file from UPLOAD_FOLDER → CORPUS_FOLDER, disambiguating name
      collisions with a short hash-derived suffix.
-  4. Reuse the `preprocessed_ngrams`, `main_content`, `reference_section`,
-     `has_references` ALREADY computed on the submission row — we never
-     recompute n-grams.
+  4. Reuse the `main_content`, `reference_section`, and `has_references`
+     ALREADY computed on the submission row. `preprocessed_ngrams` is
+     left NULL on insert and is backfilled lazily by
+     `Paper.get_all_with_ngrams_cached` (and proactively by
+     `ensure_preprocessed_ngrams()` at startup), so we still never
+     recompute n-grams synchronously on the admin's request thread.
   5. Insert a new `papers` row with peer-review provenance:
         source='peer_reviewed',
         submission_id=<sub.id>,
@@ -111,8 +114,7 @@ def promote_submission(
         cur = conn.cursor()
         sub_row = cur.execute(
             "SELECT id, filename, file_path, content_text, main_content, "
-            "       reference_section, has_references, preprocessed_ngrams, "
-            "       domain_tag "
+            "       reference_section, has_references, domain_tag "
             "FROM submissions WHERE id = ?",
             (submission_id,),
         ).fetchone()
@@ -169,7 +171,7 @@ def promote_submission(
                     submission.get('main_content'),
                     submission.get('reference_section'),
                     int(bool(submission.get('has_references'))),
-                    submission.get('preprocessed_ngrams'),
+                    None,  # preprocessed_ngrams: backfilled lazily by Paper.get_all_with_ngrams_cached / ensure_preprocessed_ngrams()
                     None,  # uploaded_by: peer-reviewed papers are not "uploaded by" anyone
                     submission_id,
                     content_hash,

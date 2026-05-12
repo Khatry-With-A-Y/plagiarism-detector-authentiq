@@ -3,15 +3,26 @@ seed_demo_data.py — one-command, idempotent demo seed.
 
 Creates a viva-ready dataset:
   - Reuses the legacy `admin` user (auto-seeded by `init_database`)
-  - 5 reviewers           across 3 institutions (KU / PU / IoE)
-  - 3 regular users       (one of which submits the demo submission)
-  - 1 approved corpus paper
-  - 1 review-eligible submission (low-similarity, status='completed',
-    review_status='pending' so admin can drive the assign flow during demo)
-  - 1 pending reviewer application
+  - 12 reviewers          across 4 institutions (KU / PU / IoE / TU)
+  - 5 regular users
 
 Demo accounts use Nepali names (ram, sita, hari, ...) so the dataset
 reads naturally in the local-context viva.
+
+Why 12 reviewers?
+  The peer-review assignment policy picks `REVIEWERS_PER_REQUEST = 5`
+  reviewers up front (see `backend/config.py`). When a reviewer
+  declines, `Submission.decline_assignment` calls `assign_many(..., 1)`
+  to backfill — but that backfill needs *eligible candidates that are
+  not already on the panel*. With only 5 reviewers in the entire DB,
+  every reviewer is already on the panel after the initial pick, so
+  the backfill query returns zero rows and the submission instantly
+  flips to `insufficient_pool`. Seeding 12 reviewers gives the
+  backfill a comfortable buffer (7 spares after the initial 5-pick),
+  enough to demonstrate auto-replacement through several chained
+  declines without the panel collapsing. Spreading them across 4
+  institutions also lets demos exercise the same-institution
+  exclusion path when the submitter themselves is a reviewer.
 
 Run:
     python scripts/seed_demo_data.py
@@ -19,18 +30,15 @@ Run:
 Idempotency:
   - Users are upserted by `username` (skip-if-exists, password reset).
   - Reviewer profiles are upserted by `user_id` (ON CONFLICT DO UPDATE).
-  - The corpus paper is upserted by `(title, author)`.
-  - The demo submission is upserted by a stable `filename` marker.
   - Re-running this script wipes nothing — it only refreshes the
     seeded rows. Safe to run before every demo.
 
-This script writes only to `users`, `reviewers`, `papers`, `submissions`.
+This script writes only to `users`, `reviewers`.
 It NEVER deletes other rows.
 """
 
 import importlib.util
 import json
-import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -38,8 +46,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "backend" / "data" / "database.db"
-CORPUS_DIR = ROOT / "backend" / "data" / "corpus"
-UPLOADS_DIR = ROOT / "backend" / "data" / "uploads"
 
 # Add backend to path so we can import models for password hashing
 sys.path.insert(0, str(ROOT))
@@ -65,74 +71,57 @@ def _hash(password: str) -> str:
 # The legacy `admin / admin` account is auto-seeded by `init_database()`
 # (see `backend/app/utils/database.py`) and reused here — no separate
 # demo admin row.
+#
+# Cohort layout (12 reviewers across 4 institutions, 3 per institution):
+#   KU  (Kathmandu University)      : ram,    sita,   manish
+#   PU  (Pokhara University)        : hari,   dipesh, sunita
+#   IoE (Institute of Engineering)  : gita,   bishnu, sushma
+#   TU  (Tribhuvan University)      : nabin,  kabita, suman
+# This gives `assign_many` a 7-reviewer backfill buffer beyond the
+# initial 5-pick, enough to absorb several chained declines before
+# the submission flips to `insufficient_pool`.
 DEMO_USERS = [
     # username,    email,                  role,       password
-    # 5 reviewers across 3 institutions
+    # 12 reviewers across 4 institutions
+    # Kathmandu University (KU)
     ("ram",        "ram@ku.edu.np",        "reviewer", "ram"),
     ("sita",       "sita@ku.edu.np",       "reviewer", "sita"),
+    ("manish",     "manish@ku.edu.np",     "reviewer", "manish"),
+    # Pokhara University (PU)
     ("hari",       "hari@pu.edu.np",       "reviewer", "hari"),
+    ("dipesh",     "dipesh@pu.edu.np",     "reviewer", "dipesh"),
+    ("sunita",     "sunita@pu.edu.np",     "reviewer", "sunita"),
+    # Institute of Engineering (IoE)
     ("gita",       "gita@ioe.edu.np",      "reviewer", "gita"),
     ("bishnu",     "bishnu@ioe.edu.np",    "reviewer", "bishnu"),
-    # 3 regular users
+    ("sushma",     "sushma@ioe.edu.np",    "reviewer", "sushma"),
+    # Tribhuvan University (TU)
+    ("nabin",      "nabin@tu.edu.np",      "reviewer", "nabin"),
+    ("kabita",     "kabita@tu.edu.np",     "reviewer", "kabita"),
+    ("suman",      "suman@tu.edu.np",      "reviewer", "suman"),
+    # 5 regular users
     ("krishna",    "krishna@example.com",  "user",     "krishna"),
     ("radha",      "radha@example.com",    "user",     "radha"),
     ("arjun",      "arjun@example.com",    "user",     "arjun"),
-    # 1 pending applicant — applies during the demo / already on file
-    ("binod",      "binod@tu.edu.np",      "user",     "binod"),
+    ("prakash",    "prakash@example.com",  "user",     "prakash"),
+    ("maya",       "maya@example.com",     "user",     "maya"),
 ]
 
 REVIEWER_PROFILES = {
     # username:  (institution_domain, institution_name)
     "ram":       ("ku.edu.np",  "Kathmandu University"),
     "sita":      ("ku.edu.np",  "Kathmandu University"),
+    "manish":    ("ku.edu.np",  "Kathmandu University"),
     "hari":      ("pu.edu.np",  "Pokhara University"),
+    "dipesh":    ("pu.edu.np",  "Pokhara University"),
+    "sunita":    ("pu.edu.np",  "Pokhara University"),
     "gita":      ("ioe.edu.np", "Institute of Engineering"),
     "bishnu":    ("ioe.edu.np", "Institute of Engineering"),
+    "sushma":    ("ioe.edu.np", "Institute of Engineering"),
+    "nabin":     ("tu.edu.np",  "Tribhuvan University"),
+    "kabita":    ("tu.edu.np",  "Tribhuvan University"),
+    "suman":     ("tu.edu.np",  "Tribhuvan University"),
 }
-
-PENDING_APPLICATION = {
-    "username":           "binod",
-    "institution_domain": "tu.edu.np",
-    "institution_name":   "Tribhuvan University",
-    "affiliation":        "MSc Computer Science",
-    "bio":                ("PhD candidate at TU with research interests in NLP "
-                           "and academic-integrity systems. Open to reviewing "
-                           "computer-science submissions across all subdomains."),
-}
-
-CORPUS_PAPER_TITLE  = "Demo: Foundations of Plagiarism Detection"
-CORPUS_PAPER_AUTHOR = "Authentiq Demo Author"
-CORPUS_PAPER_BODY = """\
-This paper describes a representative demonstration corpus document used in
-the Authentiq academic-integrity demo. It introduces the foundational ideas
-behind n-gram based similarity, inverse document frequency weighting, and
-cosine similarity over normalised lexical features. The chapter sketches the
-pipeline followed by the system, including text extraction, sentence-level
-preprocessing, and corpus-side caching. The intended use of this paper is as
-a reference document against which student submissions are checked. A
-detailed treatment of reference-section exclusion, sentence-level evidence,
-and bibliographic detection follows in subsequent sections of the corpus.
-
-References
-
-[1] Salton, G. and Buckley, C. (1988). Term-weighting approaches in automatic
-text retrieval. Information Processing and Management, 24(5):513-523.
-[2] Manning, C., Raghavan, P., and Schutze, H. (2008). Introduction to
-Information Retrieval. Cambridge University Press.
-"""
-
-DEMO_SUBMISSION_FILENAME = "demo_submission_seed.txt"
-DEMO_SUBMISSION_BODY = """\
-This is a seeded student submission that intentionally has low similarity
-against the demo corpus document. It exists to drive the peer-review
-workflow end-to-end: the user requests review, the admin assigns five
-reviewers, the reviewers accept and vote, the admin promotes the paper, and
-on the next similarity check the corpus contains the new document.
-
-The text below is intentionally distinct from the seeded corpus so the
-detector reports a low-similarity score, which is what makes the submission
-review-eligible (the threshold is REVIEW_ELIGIBILITY_THRESHOLD in config).
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -220,145 +209,6 @@ def _ensure_reviewer_profile(conn, user_id, username, domain, name, status):
     })
 
 
-def _ensure_pending_application(conn, applicant_user_id):
-    """Insert/update a pending reviewer application for the demo applicant."""
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO reviewers (
-            user_id, application_status, submitted_at,
-            institution_domain, institution_name, affiliation,
-            institutional_email, bio, expertise_tags
-        ) VALUES (
-            :user_id, 'pending', :now,
-            :domain, :name, :affiliation,
-            :email, :bio, :tags
-        )
-        ON CONFLICT(user_id) DO UPDATE SET
-            application_status  = 'pending',
-            institution_domain  = excluded.institution_domain,
-            institution_name    = excluded.institution_name,
-            affiliation         = excluded.affiliation,
-            institutional_email = excluded.institutional_email,
-            bio                 = excluded.bio,
-            expertise_tags      = excluded.expertise_tags,
-            reviewed_at         = NULL,
-            reviewed_by         = NULL,
-            decision_reason     = NULL,
-            verified_at         = NULL,
-            revoked_at          = NULL,
-            revoked_by          = NULL,
-            revoke_reason       = NULL
-    """, {
-        "user_id":     applicant_user_id,
-        "now":         _now_utc(),
-        "domain":      PENDING_APPLICATION["institution_domain"],
-        "name":        PENDING_APPLICATION["institution_name"],
-        "affiliation": PENDING_APPLICATION["affiliation"],
-        # institutional_email is UNIQUE — derive from the applicant's
-        # username so re-runs and historical demo rows never collide.
-        "email":       (f"{PENDING_APPLICATION['username']}@"
-                        f"{PENDING_APPLICATION['institution_domain']}"),
-        "bio":         PENDING_APPLICATION["bio"],
-        "tags":        json.dumps(["CS"]),
-    })
-
-
-def _ensure_corpus_paper(conn, admin_id):
-    """Upsert the demo corpus paper. Computes preprocessed n-grams."""
-    from backend.app.utils.text_processing import TextProcessor
-    from backend.app.utils.reference_detector import ReferenceDetector
-
-    # Make sure on-disk corpus location exists.
-    CORPUS_DIR.mkdir(parents=True, exist_ok=True)
-    filename = "demo_corpus_seed.txt"
-    file_path = CORPUS_DIR / filename
-    file_path.write_text(CORPUS_PAPER_BODY, encoding="utf-8")
-
-    main_content, reference_section = ReferenceDetector.split_content_and_references(
-        CORPUS_PAPER_BODY
-    )
-    has_references = bool(reference_section)
-    ngrams = TextProcessor.preprocess_for_tfidf(main_content) if main_content else []
-    preprocessed = json.dumps(ngrams)
-
-    cur = conn.cursor()
-    row = cur.execute(
-        "SELECT id FROM papers WHERE title=? AND author=?",
-        (CORPUS_PAPER_TITLE, CORPUS_PAPER_AUTHOR)
-    ).fetchone()
-    if row is None:
-        cur.execute("""
-            INSERT INTO papers (
-                title, author, filename, file_path, content_text,
-                main_content, reference_section, has_references,
-                preprocessed_ngrams, uploaded_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            CORPUS_PAPER_TITLE, CORPUS_PAPER_AUTHOR,
-            filename, str(file_path), CORPUS_PAPER_BODY,
-            main_content, reference_section, has_references,
-            preprocessed, admin_id,
-        ))
-        return cur.lastrowid, "created"
-    cur.execute("""
-        UPDATE papers SET
-            filename = ?, file_path = ?, content_text = ?,
-            main_content = ?, reference_section = ?, has_references = ?,
-            preprocessed_ngrams = ?, uploaded_by = ?
-        WHERE id = ?
-    """, (
-        filename, str(file_path), CORPUS_PAPER_BODY,
-        main_content, reference_section, has_references,
-        preprocessed, admin_id, row["id"],
-    ))
-    return row["id"], "refreshed"
-
-
-def _ensure_demo_submission(conn, submitter_id):
-    """Upsert the review-eligible demo submission."""
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    file_path = UPLOADS_DIR / DEMO_SUBMISSION_FILENAME
-    file_path.write_text(DEMO_SUBMISSION_BODY, encoding="utf-8")
-
-    cur = conn.cursor()
-    row = cur.execute(
-        "SELECT id FROM submissions WHERE filename=?",
-        (DEMO_SUBMISSION_FILENAME,)
-    ).fetchone()
-    if row is None:
-        cur.execute("""
-            INSERT INTO submissions (
-                user_id, filename, file_path, status,
-                domain_tag, review_status, review_votes,
-                pass_votes, fail_votes
-            ) VALUES (
-                ?, ?, ?, 'completed', 'CS', 'pending', '[]', 0, 0
-            )
-        """, (submitter_id, DEMO_SUBMISSION_FILENAME, str(file_path)))
-        return cur.lastrowid, "created"
-    # Reset to a clean pending review state — drops any in-flight votes from
-    # a previous demo so the next assignment cycle starts fresh.
-    cur.execute("""
-        UPDATE submissions SET
-            user_id = ?,
-            status = 'completed',
-            domain_tag = 'CS',
-            review_status = 'pending',
-            review_votes = '[]',
-            pass_votes = 0,
-            fail_votes = 0,
-            review_outcome = NULL,
-            admin_decision = NULL,
-            admin_decided_by = NULL,
-            admin_decided_at = NULL,
-            admin_decision_reason = NULL,
-            pool_breakdown = NULL,
-            file_path = ?
-        WHERE id = ?
-    """, (submitter_id, str(file_path), row["id"]))
-    return row["id"], "refreshed"
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -376,22 +226,7 @@ def main():
     try:
         conn.execute("BEGIN IMMEDIATE")
 
-        # 0. Look up the legacy admin user (auto-seeded by `init_database`).
-        #    We reuse it as the corpus uploader rather than creating a
-        #    separate `demo_admin` row, so the demo dataset stays minimal.
-        admin_row = conn.execute(
-            "SELECT id FROM users WHERE username='admin'"
-        ).fetchone()
-        if admin_row is None:
-            raise RuntimeError(
-                "Legacy 'admin' user is missing from the DB. "
-                "Run `python backend/run_backend.py` once first so "
-                "`init_database()` seeds it (admin / admin)."
-            )
-        admin_id = admin_row["id"]
-        print(f"  reusing legacy admin user -> id={admin_id}")
-
-        # 1. Users (5 reviewers + 3 users + 1 applicant)
+        # 1. Users (12 reviewers + 5 regular users)
         user_ids = {}
         for username, email, role, pw in DEMO_USERS:
             uid, action = _ensure_user(conn, username, email, role, pw)
@@ -405,20 +240,6 @@ def main():
             )
             print(f"  reviewer profile {username:<10} -> {name} ({domain})")
 
-        # 3. Pending application
-        _ensure_pending_application(conn, user_ids["binod"])
-        print(f"  pending application: binod @ "
-              f"{PENDING_APPLICATION['institution_name']}")
-
-        # 4. Corpus paper (uploaded by the legacy admin)
-        paper_id, action = _ensure_corpus_paper(conn, admin_id)
-        print(f"  corpus paper id={paper_id} [{action}]")
-
-        # 5. Review-eligible demo submission (owned by 'krishna')
-        submitter_id = user_ids["krishna"]
-        sub_id, action = _ensure_demo_submission(conn, submitter_id)
-        print(f"  demo submission id={sub_id} owner={submitter_id} [{action}]")
-
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -430,15 +251,16 @@ def main():
     print("\n" + "=" * 70)
     print("Demo credentials (password = username)")
     print("=" * 70)
-    print(f"  Admin       : admin / admin           (legacy account, reused)")
-    print(f"  Reviewers   : ram, sita (KU)  hari (PU)  gita, bishnu (IoE)")
-    print(f"  Users       : krishna, radha, arjun")
-    print(f"  Applicant   : binod                  (pending reviewer application)")
+    print(f"  Admin       : admin / admin                       (legacy account, reused)")
+    print(f"  Reviewers   : ram, sita, manish                    (KU  — Kathmandu University)")
+    print(f"                hari, dipesh, sunita                 (PU  — Pokhara University)")
+    print(f"                gita, bishnu, sushma                 (IoE — Institute of Engineering)")
+    print(f"                nabin, kabita, suman                 (TU  — Tribhuvan University)")
+    print(f"  Users       : krishna, radha, arjun, prakash, maya")
     print()
-    print("Seeded artifacts:")
-    print(f"  corpus paper   : {CORPUS_PAPER_TITLE!r} by {CORPUS_PAPER_AUTHOR!r}")
-    print(f"  demo submission: {DEMO_SUBMISSION_FILENAME} (owner=krishna, "
-          "status=completed, review_status=pending)")
+    print("Pool sizing: 12 reviewers / 4 institutions gives `assign_many`")
+    print("a 7-reviewer backfill buffer beyond the initial 5-pick — enough")
+    print("to demo decline → auto-replacement through several chained declines.")
     print()
     print("Done. Re-run anytime — the script is idempotent.")
 

@@ -51,9 +51,9 @@ REVIEW_ELIGIBILITY_THRESHOLD = 0.20   # alias retained for legacy references
 REVIEW_ELIGIBILITY_UPPER = 0.20
 REVIEW_ELIGIBILITY_LOWER = 0.05
 
-# Reviewer assignment sizing and quorum.
+# Reviewer assignment sizing.
 REVIEWERS_PER_REQUEST = 5
-MIN_REVIEWERS_PER_REQUEST = 3  # MUST be odd; majority-of-N only works cleanly when N is odd
+MIN_REVIEWERS_PER_REQUEST = 3  # Minimum active reviewers required before a panel can open.
 
 # Accept/Decline/Vote deadline window for a reviewer.
 REVIEW_DEADLINE_HOURS = 72
@@ -82,6 +82,31 @@ BIO_MAX_LEN = 2000
 
 # Decline-reason length cap (Block 5).
 DECLINE_REASON_MAX_LEN = 500
+
+# ---------------------------------------------------------------------------
+# Reviewer-decline accountability layer (see .junie/plans/decline-handling-implementation.md).
+# Rolling-window thresholds for auto-pause of serial decliners. Counts are
+# computed on-demand from submissions.review_votes via SQLite json_each.
+# ---------------------------------------------------------------------------
+
+# Rolling-window thresholds for the reviewer decline accountability rule.
+REVIEWER_DECLINE_WINDOW_DAYS       = 30
+REVIEWER_DECLINE_SOFT_LIMIT        = 3
+REVIEWER_DECLINE_HARD_LIMIT        = 5
+REVIEWER_DECLINE_GRACE_ASSIGNMENTS = 5    # min lifetime assignments before auto-pause can fire
+
+# Structured decline-reason taxonomy. Mirrors FAIL_REASON_TAXONOMY style.
+DECLINE_REASON_TAXONOMY = [
+    'conflict_of_interest',   # excluded from threshold count
+    'out_of_expertise',       # excluded from threshold count
+    'workload',
+    'unavailable',
+    'other',
+]
+
+# Categories that count toward the pause threshold. Legacy entries without a
+# category are treated as 'unspecified' and count at full weight.
+DECLINE_COUNTABLE_CATEGORIES = ('workload', 'unavailable', 'other', 'unspecified')
 
 # Deterministic assignment hook for tests. When set (e.g.,
 # ASSIGNMENT_TEST_SEED=12345), assign_many's ORDER BY RANDOM() is replaced

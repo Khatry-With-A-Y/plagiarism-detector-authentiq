@@ -80,13 +80,78 @@ def _migrate_users_role_check(conn):
         conn.execute('PRAGMA foreign_keys=ON;')
 
 
+def _migrate_users_status_check(conn):
+    """Idempotent rebuild of the `users` table to extend the `status` CHECK
+    to ('active','blocked','paused').
+
+    Mirrors `_migrate_users_role_check`: if the current CREATE statement in
+    sqlite_master already contains 'paused', the rebuild is skipped.
+    Otherwise we rebuild the table inside BEGIN EXCLUSIVE, preserving
+    rowids (thereby preserving all FK references pointing at users(id)).
+    Existing rows keep their existing status values, so no data conversion
+    is needed.
+
+    See .junie/plans/decline-handling-implementation.md for the full design.
+    """
+    cursor = conn.cursor()
+    row = cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if row is None:
+        # users table not yet created — CREATE TABLE IF NOT EXISTS in
+        # init_database() will create it with the expanded CHECK directly.
+        return
+    existing_sql = row['sql'] or ''
+    if "'paused'" in existing_sql:
+        # Already migrated; nothing to do.
+        return
+
+    print("Migrating users.status CHECK to include 'paused' (idempotent rebuild)...")
+    # FK must be off so temporary rename/drop doesn't trip referential integrity.
+    conn.execute('PRAGMA foreign_keys=OFF;')
+    try:
+        conn.execute('BEGIN EXCLUSIVE;')
+        # Discover existing columns so INSERT SELECT preserves unknown future columns.
+        col_rows = conn.execute("PRAGMA table_info(users)").fetchall()
+        col_names = [c['name'] for c in col_rows]
+        col_list = ', '.join(col_names)
+
+        conn.execute('''
+            CREATE TABLE users_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT DEFAULT 'user' CHECK(role IN ('user', 'reviewer', 'admin')),
+                status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked', 'paused')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute(f'INSERT INTO users_new ({col_list}) SELECT {col_list} FROM users;')
+        conn.execute('DROP TABLE users;')
+        conn.execute('ALTER TABLE users_new RENAME TO users;')
+        conn.execute('COMMIT;')
+        # Validate nothing broke.
+        conn.execute('PRAGMA foreign_key_check;')
+        print("users.status CHECK rebuild completed successfully.")
+    except Exception as exc:
+        try:
+            conn.execute('ROLLBACK;')
+        except sqlite3.OperationalError:
+            pass
+        print(f"users.status migration FAILED and was rolled back: {exc}")
+        raise
+    finally:
+        conn.execute('PRAGMA foreign_keys=ON;')
+
+
 def init_database():
     """Initialize the database with all required tables"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     # Create users table (NEW installs get the expanded CHECK; EXISTING installs
-    # are migrated by _migrate_users_role_check below).
+    # are migrated by _migrate_users_role_check + _migrate_users_status_check below).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,7 +159,7 @@ def init_database():
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT DEFAULT 'user' CHECK(role IN ('user', 'reviewer', 'admin')),
-            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked')),
+            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked', 'paused')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -105,11 +170,16 @@ def init_database():
     # re-run; no-op once the CHECK already contains 'reviewer'.
     _migrate_users_role_check(conn)
 
+    # Idempotent migration (decline-handling): widen the status CHECK to
+    # include 'paused' for the reviewer auto-pause accountability layer.
+    # See .junie/plans/decline-handling-implementation.md.
+    _migrate_users_status_check(conn)
+
     # Check if status column exists, add it if not (migration)
     cursor.execute("PRAGMA table_info(users)")
     columns = [col['name'] for col in cursor.fetchall()]
     if 'status' not in columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked'))")
+        cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked', 'paused'))")
     
     # Create papers table (corpus)
     cursor.execute('''
@@ -237,7 +307,9 @@ def init_database():
         cursor.execute("ALTER TABLE submissions ADD COLUMN fail_votes INTEGER NOT NULL DEFAULT 0")
         print("Added fail_votes column to submissions table")
     if 'review_outcome' not in submission_columns:
-        # 'pass' or 'fail' once the panel majority crystallizes.
+        # 'pass' or 'fail' — final panel tally, only written once every
+        # active reviewer has voted and the panel transitions to
+        # 'awaiting_admin'.
         cursor.execute("ALTER TABLE submissions ADD COLUMN review_outcome TEXT")
         print("Added review_outcome column to submissions table")
     if 'admin_decision' not in submission_columns:
@@ -413,6 +485,40 @@ def init_database():
     if 'verification_window_started_at' not in rev_cols:
         cursor.execute("ALTER TABLE reviewers ADD COLUMN verification_window_started_at TIMESTAMP")
         print("Added verification_window_started_at column to reviewers table")
+
+    # ----------------------------------------------------------------------
+    # Migration: reviewer-decline accountability (auto-pause metadata)
+    # ----------------------------------------------------------------------
+    # Adds 5 nullable columns to `reviewers` mirroring the existing
+    # `revoked_at`/`revoked_by`/`revoke_reason` triplet. Populated by the
+    # auto-pause path in Submission.decline_assignment and the admin
+    # manual pause/unpause endpoints. See
+    # .junie/plans/decline-handling-implementation.md for the full design.
+    #
+    # Columns:
+    #   - paused_at           TIMESTAMP   (set when auto- or manual-pause fires)
+    #   - paused_by           INTEGER     (admin user id; NULL when auto-paused)
+    #   - paused_reason       TEXT        ('auto:rolling_window_exceeded' or admin free-text)
+    #   - paused_until        TIMESTAMP   (earliest possible auto-unpause)
+    #   - last_pause_eval_at  TIMESTAMP   (anchor for the lazy sweep)
+    if 'paused_at' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN paused_at TIMESTAMP")
+        print("Added paused_at column to reviewers table")
+    if 'paused_by' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN paused_by INTEGER")
+        print("Added paused_by column to reviewers table")
+    if 'paused_reason' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN paused_reason TEXT")
+        print("Added paused_reason column to reviewers table")
+    if 'paused_until' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN paused_until TIMESTAMP")
+        print("Added paused_until column to reviewers table")
+    if 'last_pause_eval_at' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN last_pause_eval_at TIMESTAMP")
+        print("Added last_pause_eval_at column to reviewers table")
+
+    # Index on reviewers.paused_at for the lazy auto-unpause sweep.
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewers_paused_at ON reviewers(paused_at)')
 
     # Index on submissions.review_status for fast admin-queue filters.
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_submissions_review_status ON submissions(review_status)')
