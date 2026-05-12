@@ -11,6 +11,7 @@ import UserStatistics from './pages/user/UserStatistics';
 import CorpusManagement from './pages/admin/CorpusManagement';
 import UserManagement from './pages/admin/UserManagement';
 import ApplyReviewer from './pages/reviewer/ApplyReviewer';
+import VerifyEmail from './pages/reviewer/VerifyEmail';
 import ReviewerDashboard from './pages/reviewer/ReviewerDashboard';
 import ReviewDetail from './pages/reviewer/ReviewDetail';
 import './index.css';
@@ -115,6 +116,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <ApplyReviewer />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reviewer/verify-email"
+            element={
+              <ProtectedRoute>
+                <VerifyEmail />
               </ProtectedRoute>
             }
           />

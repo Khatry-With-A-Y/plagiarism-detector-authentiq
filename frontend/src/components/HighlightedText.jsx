@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, forwardRef, useImperativeHandle, useRef } from 'react';
 import './HighlightedText.css';
 
 /**
@@ -8,9 +8,23 @@ import './HighlightedText.css';
  *   text: string - The full text to display
  *   highlights: Array<{start, end, similarity}> - Positions to highlight
  *   maxChars: number - Maximum characters to show initially (default 3000)
+ *
+ * Imperative ref API (Stage 4 — used by the reviewer review page):
+ *   expand()        — force the truncated view fully open
+ *   getContainer()  — return the inner highlights container DOM node so
+ *                     callers can query individual <mark data-start="..."/>
+ *                     nodes and scroll to them
  */
-function HighlightedText({ text, highlights = [], maxChars = 3000 }) {
+const HighlightedText = forwardRef(function HighlightedText(
+  { text, highlights = [], maxChars = 3000 },
+  ref
+) {
   const [expanded, setExpanded] = useState(false);
+  const containerRef = useRef(null);
+  useImperativeHandle(ref, () => ({
+    expand: () => setExpanded(true),
+    getContainer: () => containerRef.current,
+  }), []);
 
   const segments = useMemo(() => {
     if (!text) return [];
@@ -110,12 +124,14 @@ function HighlightedText({ text, highlights = [], maxChars = 3000 }) {
           <span className="highlight-count">{highlightCount} matching sentence{highlightCount !== 1 ? 's' : ''}</span>
         </div>
       )}
-      <div className="highlighted-text">
+      <div className="highlighted-text" ref={containerRef}>
         {visibleSegments.map((segment, idx) => (
           segment.highlighted ? (
             <mark
               key={idx}
               className="highlight"
+              data-start={segment.start}
+              data-end={segment.end}
               style={{
                 backgroundColor: `rgba(239, 68, 68, ${0.15 + (segment.similarity || 0.5) * 0.55})`
               }}
@@ -139,6 +155,6 @@ function HighlightedText({ text, highlights = [], maxChars = 3000 }) {
       )}
     </div>
   );
-}
+});
 
 export default HighlightedText;

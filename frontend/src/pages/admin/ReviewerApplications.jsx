@@ -45,10 +45,21 @@ function ReviewerApplications() {
     setHistoryLoading(true);
     try {
       const res = await notificationsAPI.getUserNotificationsForAdmin(app.user_id);
-      const relevant = (res.data.notifications || []).filter(n =>
-        n.title.toLowerCase().includes('reviewer application') ||
-        n.title.toLowerCase().includes('application')
-      );
+      // Block 7 (Stage 7c): include the full reviewer-onboarding journey in
+      // the history timeline — submission, email verification, admin
+      // approve/reject, and (most importantly) revocation. The previous
+      // filter only matched titles containing "application", which silently
+      // hid the "Reviewer Status Revoked" notification (and the admin's
+      // typed reason that rides along in its message body).
+      const relevant = (res.data.notifications || []).filter(n => {
+        const t = (n.title || '').toLowerCase();
+        return (
+          t.includes('application') ||
+          t.includes('reviewer status') ||
+          t.includes('revoke') ||
+          t.includes('institutional email')
+        );
+      });
       setAppHistory(relevant);
     } catch {
       setAppHistory([]);
@@ -67,6 +78,10 @@ function ReviewerApplications() {
       await reviewersAPI.adminDecide(decisionModal.app.user_id, decisionModal.decision, decisionModal.reason);
       setDecisionModal({ show: false, app: null, decision: '', reason: '' });
       fetchApplications();
+      // Block 7 (Stage 7c): admin just approved/rejected a pending application —
+      // refresh the navbar "Reviewer Onboarding" count immediately so the
+      // badge number updates without waiting for the 60s polling tick.
+      window.dispatchEvent(new Event('reviewer-apps:refresh'));
     } catch (err) {
       alert("Error submitting decision: " + (err.response?.data?.error || err.message));
     } finally {
@@ -117,6 +132,12 @@ function ReviewerApplications() {
                 <option value="pending">Pending</option>
                 <option value="approved">Approved</option>
                 <option value="rejected">Rejected</option>
+                {/* Block 7 (Stage 7c): "Revoked" is a synthetic status — backend
+                    treats it as `revoked_at IS NOT NULL`, and the plain
+                    "Rejected" filter now excludes these rows so admins can
+                    distinguish "application rejected" from "ex-reviewer
+                    revoked". */}
+                <option value="revoked">Revoked</option>
                 <option value="">All Statuses</option>
             </select>
         </div>
@@ -165,13 +186,28 @@ function ReviewerApplications() {
                   </td>
                   <td>
                     {/* Block 7 (Stage 7c): show 'REVOKED' badge when reviewer was revoked. */}
-                    <span className={`dashboard-risk-badge ${
-                      app.revoked_at ? 'high' :
-                      app.application_status === 'approved' ? 'low' :
-                      app.application_status === 'pending' ? 'medium' : 'high'
-                    }`}>
-                        {app.revoked_at ? 'REVOKED' : app.application_status.toUpperCase()}
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                      <span className={`dashboard-risk-badge ${
+                        app.revoked_at ? 'high' :
+                        app.application_status === 'approved' ? 'low' :
+                        app.application_status === 'pending' ? 'medium' : 'high'
+                      }`}>
+                          {app.revoked_at ? 'REVOKED' : app.application_status.toUpperCase()}
+                      </span>
+                      {/* Institutional-email verification badge.
+                          The Approve button is gated on this flag both here
+                          and at the API layer; an unverified row cannot be
+                          approved no matter what the UI does. */}
+                      <span
+                        className={`dashboard-risk-badge ${app.email_verified ? 'low' : 'high'}`}
+                        title={app.email_verified
+                          ? 'Applicant clicked the verification link sent to their institutional inbox.'
+                          : 'Applicant has not yet verified their institutional email.'}
+                        style={{ fontSize: '10px' }}
+                      >
+                        {app.email_verified ? 'EMAIL ✓' : 'EMAIL ✗'}
+                      </span>
+                    </div>
                   </td>
                   <td style={{ color: '#64748b' }}>{new Date(app.submitted_at).toLocaleDateString()}</td>
                   <td>
@@ -185,15 +221,25 @@ function ReviewerApplications() {
                         </button>
                         {app.application_status === 'pending' && (
                             <>
-                                <button 
-                                    className="dashboard-view-link" 
-                                    style={{ color: '#059669', borderColor: '#10b981', padding: '6px 12px' }}
-                                    onClick={() => handleDecisionClick(app, 'approved')}
+                                <button
+                                    className="dashboard-view-link"
+                                    style={{
+                                        color: '#059669',
+                                        borderColor: '#10b981',
+                                        padding: '6px 12px',
+                                        opacity: app.email_verified ? 1 : 0.5,
+                                        cursor: app.email_verified ? 'pointer' : 'not-allowed',
+                                    }}
+                                    onClick={() => app.email_verified && handleDecisionClick(app, 'approved')}
+                                    disabled={!app.email_verified}
+                                    title={app.email_verified
+                                        ? 'Approve this reviewer application.'
+                                        : 'Applicant has not verified their institutional email.'}
                                 >
                                     Approve
                                 </button>
-                                <button 
-                                    className="dashboard-view-link" 
+                                <button
+                                    className="dashboard-view-link"
                                     style={{ color: '#dc2626', borderColor: '#f87171', padding: '6px 12px' }}
                                     onClick={() => handleDecisionClick(app, 'rejected')}
                                 >
@@ -288,6 +334,17 @@ function ReviewerApplications() {
                           <div>
                               <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>Institutional Email</label>
                               <p style={{ marginTop: '4px' }}>{bioModal.app.institutional_email}</p>
+                              <span
+                                className={`dashboard-risk-badge ${bioModal.app.email_verified ? 'low' : 'high'}`}
+                                style={{ marginTop: '6px', display: 'inline-flex', fontSize: '11px' }}
+                              >
+                                {bioModal.app.email_verified ? 'Verified ✓' : 'Unverified ✗'}
+                              </span>
+                              {bioModal.app.email_verified && bioModal.app.email_verified_at && (
+                                <p style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                                    Verified on {new Date(bioModal.app.email_verified_at).toLocaleString()}
+                                </p>
+                              )}
                           </div>
                           <div>
                               <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>Institution</label>

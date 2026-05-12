@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import { notificationsAPI } from '../../api/notifications';
 import useAuth from '../../hooks/useAuth';
 import Results from './Results';
 import UserStatistics from './UserStatistics';
 import ReviewBadge from '../../components/ReviewBadge';
+import Avatar from '../../components/Avatar';
 import ApplyReviewer from '../reviewer/ApplyReviewer';
 import ReviewerDashboard from '../reviewer/ReviewerDashboard';
 import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
 import '../dashboard.css';
+
+const REVIEWER_WORK_TAB_ID = 'reviewer-work';
 
 function UserDashboard() {
   const { user, logout, isAdmin } = useAuth();
@@ -30,7 +33,15 @@ function UserDashboard() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [openTabs, setOpenTabs] = useState([]);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const location = useLocation();
+  // If the user is navigated here with `state.openTab`, honor it (e.g. coming
+  // back from the standalone review-assignment page so the navbar's
+  // "My Reviews" tab is selected instead of the default Dashboard view).
+  const [activeTab, setActiveTab] = useState(() => (
+    location.state?.openTab === REVIEWER_WORK_TAB_ID
+      ? REVIEWER_WORK_TAB_ID
+      : 'dashboard'
+  ));
   const [showReviewerApp, setShowReviewerApp] = useState(false);
   const [reviewerAppSubmitted, setReviewerAppSubmitted] = useState(false);
   const [showLeftScroll, setShowLeftScroll] = useState(false);
@@ -44,7 +55,6 @@ function UserDashboard() {
   const notificationsRef = useRef(null);
   const userMenuRef = useRef(null);
   const navigate = useNavigate();
-  const REVIEWER_WORK_TAB_ID = 'reviewer-work';
 
   const checkScrollability = () => {
     if (navTabsContainerRef.current) {
@@ -642,9 +652,11 @@ function UserDashboard() {
             )}
           </div>
           <div className="dashboard-user-menu" ref={userMenuRef}>
-            <div className="dashboard-avatar" onClick={() => setShowUserMenu(!showUserMenu)}>
-              <img src={`https://ui-avatars.com/api/?name=${user?.username || 'User'}&background=1e40af&color=fff`} alt="User" />
-            </div>
+            <Avatar
+              name={user?.username || 'User'}
+              className="dashboard-avatar"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+            />
             {showUserMenu && (
               <div className="dashboard-dropdown">
                 <button className="dashboard-dropdown-item" onClick={() => navigate('/profile')}>

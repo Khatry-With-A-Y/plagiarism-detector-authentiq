@@ -34,6 +34,13 @@ export const reviewsAPI = {
     },
     getAssignment: (submissionId) =>
         api.get(`/reviews/assignments/${submissionId}`),
+    // Stage 1: stream the original uploaded PDF for an active assignment.
+    // Bearer-token auth flows through the shared `api` axios instance, so the
+    // caller converts the blob to an object URL and embeds it in an iframe.
+    getAssignmentFile: (submissionId) =>
+        api.get(`/reviews/assignments/${submissionId}/file`, {
+            responseType: 'blob',
+        }),
     submitVote: (submissionId, vote, comment, failReasons) =>
         api.post(`/reviews/assignments/${submissionId}/vote`, {
             vote,

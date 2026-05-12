@@ -195,6 +195,64 @@
   cursor: text !important;
 }
 
+/* Reserve room on the right for the custom password toggle */
+.auth-input-field.has-password-toggle {
+  padding-right: 44px;
+}
+
+/* Hide native browser password reveal/clear controls so our custom
+   toggle is the single, always-visible control. */
+.password-wrapper input::-ms-reveal,
+.password-wrapper input::-ms-clear {
+  display: none;
+}
+.password-wrapper input::-webkit-credentials-auto-fill-button,
+.password-wrapper input::-webkit-textfield-decoration-container {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+}
+
+/* Always-visible custom show/hide password button */
+.password-toggle-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.password-toggle-btn:hover {
+  color: #1e40af;
+  background-color: #f3f4f6;
+}
+
+.password-toggle-btn:focus {
+  outline: none;
+  color: #1e40af;
+}
+
+.password-toggle-btn:focus-visible {
+  box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.35);
+}
+
+.password-toggle-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 .checkbox-container {
   display: flex;
   align-items: flex-start;

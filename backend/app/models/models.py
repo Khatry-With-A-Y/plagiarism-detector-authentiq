@@ -1272,15 +1272,49 @@ class SimilarityResult:
 class Reviewer:
     @staticmethod
     def apply(user_id, institution_domain, institution_name, affiliation, institutional_email, bio, expertise_tags=["CS"]):
-        """Create or update a reviewer application"""
+        """Create or update a reviewer application.
+
+        Issues a fresh institutional-email verification token whenever the
+        applicant is new or has changed their `institutional_email`. When
+        the email is unchanged and was already verified, the prior
+        verification is preserved and no new token is generated.
+
+        Returns the raw token (str) when a verification email should be
+        sent, or None when the existing verification still stands.
+        """
+        from ..utils.email_verification import generate_token, new_expiry
+
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
+            # Look up the previous row (if any) to decide whether re-verification
+            # is needed. Email comparison is case-insensitive to match how the
+            # institution allowlist check normalises email input.
+            cursor.execute(
+                "SELECT institutional_email, email_verified FROM reviewers WHERE user_id = ?",
+                (user_id,)
+            )
+            prev = cursor.fetchone()
+            same_email = bool(
+                prev
+                and (prev['institutional_email'] or '').lower() == (institutional_email or '').lower()
+            )
+            already_verified = bool(prev and prev['email_verified'] and same_email)
+
+            raw_token = None
+            token_hash = None
+            expires_at = None
+            if not already_verified:
+                raw_token, token_hash = generate_token()
+                expires_at = new_expiry()
+
             expertise_tags_json = json.dumps(expertise_tags)
             cursor.execute('''
-                INSERT INTO reviewers (user_id, institution_domain, institution_name, affiliation, 
-                                     institutional_email, bio, expertise_tags, application_status, submitted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+                INSERT INTO reviewers (user_id, institution_domain, institution_name, affiliation,
+                                     institutional_email, bio, expertise_tags, application_status, submitted_at,
+                                     email_verified, email_verification_token_hash, email_verification_expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP,
+                        ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     institution_domain=excluded.institution_domain,
                     institution_name=excluded.institution_name,
@@ -1295,10 +1329,27 @@ class Reviewer:
                     reviewed_by=NULL,
                     revoked_at=NULL,
                     revoked_by=NULL,
-                    revoke_reason=NULL
-            ''', (user_id, institution_domain, institution_name, affiliation, institutional_email, bio, expertise_tags_json))
+                    revoke_reason=NULL,
+                    -- Preserve verification iff the email is unchanged; otherwise reset.
+                    email_verified                = CASE
+                        WHEN LOWER(excluded.institutional_email) = LOWER(reviewers.institutional_email)
+                        THEN reviewers.email_verified
+                        ELSE 0
+                    END,
+                    email_verified_at             = CASE
+                        WHEN LOWER(excluded.institutional_email) = LOWER(reviewers.institutional_email)
+                        THEN reviewers.email_verified_at
+                        ELSE NULL
+                    END,
+                    email_verification_token_hash    = excluded.email_verification_token_hash,
+                    email_verification_expires_at    = excluded.email_verification_expires_at
+            ''', (
+                user_id, institution_domain, institution_name, affiliation,
+                institutional_email, bio, expertise_tags_json,
+                1 if already_verified else 0, token_hash, expires_at,
+            ))
             conn.commit()
-            return True
+            return raw_token  # None when no email needs to be sent
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: reviewers.institutional_email" in str(e):
                 raise ValueError("Institutional email already in use by another applicant.")
@@ -1316,6 +1367,7 @@ class Reviewer:
                    strftime('%Y-%m-%dT%H:%M:%SZ', submitted_at) as submitted_at,
                    strftime('%Y-%m-%dT%H:%M:%SZ', reviewed_at) as reviewed_at,
                    strftime('%Y-%m-%dT%H:%M:%SZ', verified_at) as verified_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', email_verified_at) as email_verified_at,
                    strftime('%Y-%m-%dT%H:%M:%SZ', revoked_at) as revoked_at
             FROM reviewers WHERE user_id = ?
         ''', (user_id,))
@@ -1330,7 +1382,23 @@ class Reviewer:
 
     @staticmethod
     def list_applications(status=None, page=1, limit=50):
-        """List reviewer applications for admin"""
+        """List reviewer applications for admin.
+
+        Block 7 (Stage 7c): adds a synthetic ``status='revoked'`` filter.
+
+        ``revoke`` flips ``application_status`` from ``'approved'`` to
+        ``'rejected'`` AND stamps ``revoked_at``. Without special handling the
+        plain ``'rejected'`` filter would mix two distinct populations:
+        applicants the admin rejected and ex-reviewers who got revoked. So:
+
+        - ``status='revoked'``  → ``revoked_at IS NOT NULL`` (regardless of
+          ``application_status``, which is always ``'rejected'`` for these
+          rows but kept defensively in case the policy changes).
+        - ``status='rejected'`` → ``application_status='rejected' AND
+          revoked_at IS NULL`` (pure rejections only).
+        - ``status='approved' | 'pending'`` → unchanged.
+        - ``status=None``       → all rows.
+        """
         conn = get_db_connection()
         cursor = conn.cursor()
         offset = (page - 1) * limit
@@ -1340,48 +1408,146 @@ class Reviewer:
                    strftime('%Y-%m-%dT%H:%M:%SZ', r.submitted_at) as submitted_at,
                    strftime('%Y-%m-%dT%H:%M:%SZ', r.reviewed_at) as reviewed_at,
                    strftime('%Y-%m-%dT%H:%M:%SZ', r.verified_at) as verified_at,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', r.email_verified_at) as email_verified_at,
                    strftime('%Y-%m-%dT%H:%M:%SZ', r.revoked_at) as revoked_at
             FROM reviewers r 
             JOIN users u ON r.user_id = u.id
         '''
+        # Build the WHERE clause once and reuse it for both the SELECT and
+        # COUNT queries so paging numbers stay consistent.
+        where_clause = ''
         params = []
-        if status:
-            query += ' WHERE r.application_status = ?'
+        if status == 'revoked':
+            where_clause = ' WHERE r.revoked_at IS NOT NULL'
+        elif status == 'rejected':
+            where_clause = " WHERE r.application_status = 'rejected' AND r.revoked_at IS NULL"
+        elif status:
+            where_clause = ' WHERE r.application_status = ?'
             params.append(status)
-        
+
+        query += where_clause
         query += ' ORDER BY r.submitted_at DESC LIMIT ? OFFSET ?'
-        params.extend([limit, offset])
-        
-        cursor.execute(query, params)
+        cursor.execute(query, params + [limit, offset])
         apps = [dict(row) for row in cursor.fetchall()]
-        
+
         for a in apps:
             if a['expertise_tags']:
                 a['expertise_tags'] = json.loads(a['expertise_tags'])
-        
-        # Get total count
-        count_query = 'SELECT COUNT(*) as total FROM reviewers'
-        if status:
-            count_query += ' WHERE application_status = ?'
-            cursor.execute(count_query, [status])
-        else:
-            cursor.execute(count_query)
+
+        # Total count uses the same WHERE clause (without LIMIT/OFFSET) so
+        # pagination math matches the rows the admin actually sees.
+        count_query = 'SELECT COUNT(*) as total FROM reviewers r' + where_clause
+        cursor.execute(count_query, params)
         total = cursor.fetchone()['total']
-        
+
         conn.close()
         return apps, total
 
     @staticmethod
-    def decide(user_id, admin_id, decision, reason=None):
-        """Admin decision on reviewer application"""
-        if decision not in ['approved', 'rejected']:
-            raise ValueError("Invalid decision")
-            
+    def is_email_verified(user_id):
+        """Return True iff the reviewer row exists and `email_verified=1`."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT email_verified FROM reviewers WHERE user_id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return bool(row and row['email_verified'])
+
+    @staticmethod
+    def consume_email_verification(user_id, raw_token):
+        """Consume an institutional-email verification token (single-use).
+
+        Validates that the token matches the row's stored hash, that the
+        link has not expired, and that it has not already been consumed
+        (single-use is enforced by clearing the hash on success).
+
+        Raises:
+            ValueError("invalid")           - no row, wrong token, or already consumed.
+            ValueError("expired")           - link is past its expiry.
+        """
+        from ..utils.email_verification import hash_token, is_expired
+
+        if not raw_token:
+            raise ValueError("invalid")
+
+        token_hash = hash_token(raw_token)
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
             conn.execute('BEGIN TRANSACTION')
-            
+            cursor.execute('''
+                SELECT email_verification_token_hash, email_verification_expires_at,
+                       email_verified
+                FROM reviewers
+                WHERE user_id = ?
+            ''', (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                conn.rollback()
+                raise ValueError("invalid")
+
+            stored_hash = row['email_verification_token_hash']
+            # Single-use enforcement: once cleared, no token can match.
+            if not stored_hash or stored_hash != token_hash:
+                conn.rollback()
+                raise ValueError("invalid")
+
+            if is_expired(row['email_verification_expires_at']):
+                conn.rollback()
+                raise ValueError("expired")
+
+            now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('''
+                UPDATE reviewers SET
+                    email_verified = 1,
+                    email_verified_at = ?,
+                    email_verification_token_hash = NULL,
+                    email_verification_expires_at = NULL
+                WHERE user_id = ?
+            ''', (now, user_id))
+            conn.commit()
+            return True
+        except ValueError:
+            raise
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def decide(user_id, admin_id, decision, reason=None):
+        """Admin decision on reviewer application.
+
+        Approval is gated on institutional-email verification: an admin
+        cannot promote an applicant whose `email_verified` flag is 0,
+        even if the frontend somehow lets that decision through. This is
+        the security anchor — the route layer surfaces the ValueError as
+        a 400 with a clear message.
+        """
+        if decision not in ['approved', 'rejected']:
+            raise ValueError("Invalid decision")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            conn.execute('BEGIN TRANSACTION')
+
+            if decision == 'approved':
+                cursor.execute(
+                    "SELECT email_verified FROM reviewers WHERE user_id = ?",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+                if not row or not row['email_verified']:
+                    conn.rollback()
+                    raise ValueError(
+                        "Cannot approve: applicant's institutional email is not verified."
+                    )
+
             now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 UPDATE reviewers SET 

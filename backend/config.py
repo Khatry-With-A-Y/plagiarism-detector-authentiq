@@ -39,21 +39,7 @@ CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:5173']  # React dev s
 # Each entry is a tuple of (name, domain). Seeded into the `institutions`
 # table on every init_database() run via an upsert (see database.py).
 ALLOWED_INSTITUTION_DOMAINS = [
-    # Nepal
-    ('Tribhuvan University', 'tu.edu.np'),
-    ('Kathmandu University', 'ku.edu.np'),
-    ('Pokhara University', 'pu.edu.np'),
-    ('Institute of Medicine', 'iom.edu.np'),
-    ('Institute of Engineering', 'ioe.edu.np'),
-    ('Patan Multiple Campus', 'pcampus.edu.np'),
-    # International (for cross-border reviewer participation)
-    ('Massachusetts Institute of Technology', 'mit.edu'),
-    ('Stanford University', 'stanford.edu'),
-    ('University of Oxford', 'ox.ac.uk'),
-    ('University of Cambridge', 'cam.ac.uk'),
-    ('Harvard University', 'harvard.edu'),
-    ('Nanyang Technological University', 'ntu.edu.sg'),
-    ('National University of Singapore', 'nus.edu.sg'),
+    ('Kathford International College of Engineering and Management', 'kathford.edu.np'),
 ]
 
 # Review-request eligibility thresholds.

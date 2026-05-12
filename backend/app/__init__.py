@@ -32,6 +32,8 @@ def create_app():
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     CORPUS_FOLDER.mkdir(parents=True, exist_ok=True)
 
+    init_database()
+
     # register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(papers_bp)

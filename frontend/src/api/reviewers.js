@@ -4,7 +4,12 @@ export const reviewersAPI = {
   getInstitutions: () => api.get('/reviewers/institutions'),
   
   apply: (data) => api.post('/reviewers/apply', data),
-  
+
+  // Consume an institutional-email verification token. Called from the
+  // /reviewer/verify-email page after the user clicks the link in their
+  // institutional inbox.
+  verifyEmail: (token) => api.post('/reviewers/verify-email', { token }),
+
   getMyApplication: () => api.get('/reviewers/applications/my'),
   
   adminListApplications: (status, page = 1) => {

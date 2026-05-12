@@ -352,6 +352,41 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewers_status ON reviewers(application_status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewers_institution ON reviewers(institution_domain)')
 
+    # ----------------------------------------------------------------------
+    # Migration: institutional-email verification (reviewers role)
+    # ----------------------------------------------------------------------
+    # Adds 4 nullable columns to `reviewers` so a reviewer applicant must
+    # prove ownership of the institutional mailbox before an admin can
+    # approve. Existing approved rows are backfilled as already-verified so
+    # the demo seed and any pre-existing approvals remain consistent.
+    # Columns:
+    #   - email_verified                  INTEGER NOT NULL DEFAULT 0
+    #   - email_verified_at               TIMESTAMP
+    #   - email_verification_token_hash   TEXT       (sha256, NULL after consume)
+    #   - email_verification_expires_at   TIMESTAMP  (ISO, NULL after consume)
+    # Note: any future flow that seeds approved reviewers directly must
+    # remember to set email_verified=1 — the backfill below only catches
+    # rows that already exist at migration time.
+    cursor.execute("PRAGMA table_info(reviewers)")
+    rev_cols = [col['name'] for col in cursor.fetchall()]
+    if 'email_verified' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
+        cursor.execute("UPDATE reviewers SET email_verified = 1 WHERE application_status = 'approved'")
+        print("Added email_verified column to reviewers table")
+    if 'email_verified_at' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN email_verified_at TIMESTAMP")
+        cursor.execute(
+            "UPDATE reviewers SET email_verified_at = verified_at "
+            "WHERE application_status = 'approved' AND email_verified_at IS NULL"
+        )
+        print("Added email_verified_at column to reviewers table")
+    if 'email_verification_token_hash' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN email_verification_token_hash TEXT")
+        print("Added email_verification_token_hash column to reviewers table")
+    if 'email_verification_expires_at' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN email_verification_expires_at TIMESTAMP")
+        print("Added email_verification_expires_at column to reviewers table")
+
     # Index on submissions.review_status for fast admin-queue filters.
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_submissions_review_status ON submissions(review_status)')
 

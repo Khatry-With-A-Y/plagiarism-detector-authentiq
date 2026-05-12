@@ -7,6 +7,7 @@ import UserManagement from './UserManagement';
 import ReviewerApplications from './ReviewerApplications';
 import ReviewQueue from './ReviewQueue';
 import ReviewBadge from '../../components/ReviewBadge';
+import Avatar from '../../components/Avatar';
 import '../dashboard.css';
 import './adminStatistics.css';
 
@@ -211,35 +212,28 @@ function AdminDashboard() {
               </svg>
               Corpus Management
             </button>
-            <button
-              className={`dashboard-nav-link ${activeTab === 'reviewers' ? 'active' : ''}`}
+            {/* Block 7 (Stage 7c): reviewer onboarding tab — shows a count badge
+                with the number of pending applications awaiting admin review. */}
+            <ReviewBadge
+              variant="reviewer-applications"
+              mode="nav"
+              alwaysVisible
+              labelOverride="Reviewer Onboarding"
+              isActive={activeTab === 'reviewers'}
               onClick={() => setActiveTab('reviewers')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                <circle cx="8.5" cy="7" r="4"></circle>
-                <polyline points="17 11 19 13 23 9"></polyline>
-              </svg>
-              Reviewer Onboarding
-            </button>
-            <button
-              className={`dashboard-nav-link ${activeTab === 'review-queue' ? 'active' : ''}`}
+            />
+            {/* Block 7: peer-review queue tab — shows a count badge when items need attention. */}
+            <ReviewBadge
+              variant="admin"
+              mode="nav"
+              alwaysVisible
+              labelOverride="Peer Review Queue"
+              isActive={activeTab === 'review-queue'}
               onClick={() => setActiveTab('review-queue')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <path d="M9 15.5l2 2 4-4"></path>
-              </svg>
-              Peer Review Queue
-            </button>
+            />
           </div>
         </div>
         <div className="dashboard-navbar-right">
-          {/* Block 7: peer-review queue badge — amber when an action is pending. */}
-          <ReviewBadge variant="admin" />
           <button className="dashboard-icon-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -247,9 +241,11 @@ function AdminDashboard() {
             </svg>
           </button>
           <div className="dashboard-user-menu">
-            <div className="dashboard-avatar" onClick={() => setShowUserMenu(!showUserMenu)}>
-              <img src="https://ui-avatars.com/api/?name=Admin&background=1e40af&color=fff" alt="User" />
-            </div>
+            <Avatar
+              name="Admin"
+              className="dashboard-avatar"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+            />
             {showUserMenu && (
               <div className="dashboard-dropdown">
                 <button className="dashboard-dropdown-item" onClick={() => navigate('/profile')}>

@@ -1812,3 +1812,266 @@
     flex-direction: column;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Reviewer review-detail page (Stage 2):
+ * Two-pane workspace layout — document on the left, sticky sidebar on the
+ * right (matches + action panel). Collapses to single column under 1024px.
+ * ---------------------------------------------------------------------------
+ */
+.review-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 20px;
+  align-items: start;
+}
+
+.review-detail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.review-detail-sidebar {
+  position: sticky;
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Subtle scrollbar so the sidebar doesn't feel like a scroll-jail. */
+.review-detail-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+.review-detail-sidebar::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 3px;
+}
+.review-detail-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
+}
+
+.review-detail-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+}
+
+.review-detail-tab-btn {
+  background: none;
+  border: none;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.review-detail-tab-btn:hover {
+  color: #1e40af;
+}
+
+.review-detail-tab-btn.active {
+  color: #1e40af;
+  border-bottom-color: #1e40af;
+}
+
+.review-detail-pdf-frame {
+  width: 100%;
+  height: 70vh;
+  min-height: 480px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.review-detail-pdf-banner {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: #1e3a8a;
+  margin-bottom: 12px;
+}
+
+.review-detail-doc-empty,
+.review-detail-pdf-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.review-detail-match-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.review-detail-match-card:hover {
+  border-color: #cbd5e1;
+}
+
+.review-detail-match-card.focused {
+  border-color: #1e40af;
+  box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.12);
+}
+
+.review-detail-match-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.review-detail-match-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.review-detail-match-author {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.review-detail-match-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.review-detail-sentence-list {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.review-detail-sentence-pair {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.review-detail-sentence-pair:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.review-detail-sentence-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.review-detail-sentence-label.submission {
+  color: #b91c1c;
+}
+.review-detail-sentence-label.corpus {
+  color: #1e40af;
+}
+
+.review-detail-sentence-text {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #334155;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.review-detail-sentence-text.submission {
+  background: rgba(239, 68, 68, 0.08);
+  border-left: 2px solid #ef4444;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.review-detail-sentence-text.corpus {
+  background: rgba(59, 130, 246, 0.08);
+  border-left: 2px solid #3b82f6;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
+.review-detail-deadline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.review-detail-deadline-pill.urgent {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.review-detail-flash {
+  animation: review-detail-flash-anim 1.4s ease-out;
+}
+
+@keyframes review-detail-flash-anim {
+  0%   { background-color: rgba(250, 204, 21, 0.55); }
+  100% { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-detail-flash {
+    animation: none;
+    background-color: rgba(250, 204, 21, 0.35);
+  }
+}
+
+@media (max-width: 1023px) {
+  .review-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-detail-sidebar {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+
+  .review-detail-pdf-frame {
+    height: 60vh;
+    min-height: 400px;
+  }
+}

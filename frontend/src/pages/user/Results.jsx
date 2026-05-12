@@ -19,6 +19,7 @@ function Results({ id: propId, isEmbedded }) {
   const [requestLoading, setRequestLoading] = useState(false);
   const [requestSuccess, setRequestSuccess] = useState(false);
   const [requestError, setRequestError] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   // Block 7 (Stage 7b): submitter post-decision panel — pseudonymous
   // (`Reviewer 1..N` labels). Identity stays admin-only.
   const [panelData, setPanelData] = useState(null);
@@ -70,12 +71,23 @@ function Results({ id: propId, isEmbedded }) {
     try {
       await reviewsAPI.requestReview(id, 'CS');
       setRequestSuccess(true);
+      setShowConfirmModal(false);
       if (refresh) refresh();
     } catch (err) {
       setRequestError(err.response?.data?.error || "Failed to request review");
     } finally {
       setRequestLoading(false);
     }
+  };
+
+  const handleOpenConfirmModal = () => {
+    setRequestError(null);
+    setShowConfirmModal(true);
+  };
+
+  const handleCancelConfirm = () => {
+    if (requestLoading) return;
+    setShowConfirmModal(false);
   };
 
   const getUserInitials = () => {
@@ -326,7 +338,7 @@ function Results({ id: propId, isEmbedded }) {
                   {!submission.review_status && isEligible && (
                     <button 
                       className="dashboard-btn-primary" 
-                      onClick={handleRequestReview}
+                      onClick={handleOpenConfirmModal}
                       disabled={requestLoading || requestSuccess}
                       style={{ padding: '12px 24px' }}
                     >
@@ -612,6 +624,46 @@ function Results({ id: propId, isEmbedded }) {
           </>
         )}
       </main>
+
+      {/* Peer Review Confirmation Modal */}
+      {showConfirmModal && (
+        <div className="dashboard-modal-overlay">
+          <div className="dashboard-modal">
+            <div className="dashboard-modal-header">
+              <h3>Submit for Peer Review?</h3>
+              <p>Please confirm that you want to send this submission to the reviewer panel.</p>
+            </div>
+            <div className="dashboard-modal-body">
+              <p style={{ fontSize: '14px', color: '#334155', lineHeight: '1.6', margin: 0 }}>
+                Once submitted, this report will be assigned to a panel of expert reviewers for
+                double-blind evaluation. You will not be able to cancel or modify the request after this step.
+                If approved, your document may be added to the verified academic corpus.
+              </p>
+              {requestError && (
+                <p style={{ color: '#dc2626', fontSize: '13px', marginTop: '12px' }}>{requestError}</p>
+              )}
+            </div>
+            <div className="dashboard-modal-footer">
+              <button
+                type="button"
+                className="dashboard-modal-btn dashboard-modal-btn-secondary"
+                onClick={handleCancelConfirm}
+                disabled={requestLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="dashboard-modal-btn dashboard-modal-btn-primary"
+                onClick={handleRequestReview}
+                disabled={requestLoading}
+              >
+                {requestLoading ? 'Submitting...' : 'Confirm & Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

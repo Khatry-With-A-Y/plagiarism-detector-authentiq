@@ -113,6 +113,9 @@ function ReviewQueue() {
         setAssignMsg(prev => ({ ...prev, [submissionId]: { type: 'ok', text: `Assigned ${d.assigned} reviewer(s) successfully.` } }));
       }
       fetchQueue();
+      // Block 7: admin just changed queue state — refresh the navbar
+      // "Peer Review Queue" count immediately instead of waiting 60s.
+      window.dispatchEvent(new Event('reviews:summary-refresh'));
     } catch (err) {
       const msg = err.response?.data?.error || 'Assignment failed.';
       setAssignMsg(prev => ({ ...prev, [submissionId]: { type: 'err', text: msg } }));
@@ -194,6 +197,10 @@ function ReviewQueue() {
         } catch { /* ignore */ }
       }
       fetchQueue();
+      // Block 7: approval/rejection just removed an item from the queue —
+      // refresh the navbar "Peer Review Queue" count immediately so the
+      // badge number updates without waiting for the 60s polling tick.
+      window.dispatchEvent(new Event('reviews:summary-refresh'));
     } catch (err) {
       const apiCode = err.response?.data?.code;
       const apiMsg  = err.response?.data?.error;

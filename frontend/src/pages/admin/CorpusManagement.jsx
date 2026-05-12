@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { corpusAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
+import Avatar from '../../components/Avatar';
 import '../dashboard.css';
 
 function CorpusManagement({ isEmbedded = false }) {
@@ -298,9 +299,11 @@ function CorpusManagement({ isEmbedded = false }) {
             </svg>
           </button>
           <div className="dashboard-user-menu">
-            <div className="dashboard-avatar" onClick={() => setShowUserMenu(!showUserMenu)}>
-              <img src="https://ui-avatars.com/api/?name=Admin&background=1e40af&color=fff" alt="User" />
-            </div>
+            <Avatar
+              name="Admin"
+              className="dashboard-avatar"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+            />
             {showUserMenu && (
               <div className="dashboard-dropdown">
                 <button className="dashboard-dropdown-item" onClick={() => navigate('/profile')}>

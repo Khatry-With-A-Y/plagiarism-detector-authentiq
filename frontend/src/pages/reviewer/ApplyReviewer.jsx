@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import reviewersAPI from "../../api/reviewers";
 import useAuth from "../../hooks/useAuth";
+import Avatar from "../../components/Avatar";
 import "../dashboard.css";
 import "../auth.css";
 
@@ -22,6 +23,8 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [myApp, setMyApp] = useState(null);
+  const [resending, setResending] = useState(false);
+  const [resendInfo, setResendInfo] = useState(null);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -86,6 +89,50 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
     }
   };
 
+  // Resend the verification link by re-submitting the application with the
+  // same details. The backend rotates the token (last-write-wins) and emails
+  // a fresh link.
+  const handleResend = async () => {
+    if (!myApp || !selectedInst) {
+      setResendInfo("Cannot resend: missing application details.");
+      return;
+    }
+    setResending(true);
+    setResendInfo(null);
+    try {
+      await reviewersAPI.apply({
+        institutional_email: myApp.institutional_email || formData.institutional_email,
+        affiliation:         myApp.affiliation         || formData.affiliation,
+        bio:                 myApp.bio                 || formData.bio,
+        expertise_tags:      myApp.expertise_tags      || formData.expertise_tags,
+        institution_domain:  myApp.institution_domain  || selectedInst.domain,
+        institution_name:    myApp.institution_name    || selectedInst.name,
+      });
+      const updated = await reviewersAPI.getMyApplication();
+      setMyApp(updated.data);
+      setResendInfo("A new verification link has been sent to your institutional inbox.");
+    } catch (err) {
+      setResendInfo(err.response?.data?.error || "Failed to resend verification link.");
+    } finally {
+      setResending(false);
+    }
+  };
+
+  // Poll every 5s while we're waiting for the user to click the link in their
+  // institutional inbox. Stops automatically once `email_verified` flips.
+  useEffect(() => {
+    if (!(myApp?.application_status === 'pending' && !myApp?.email_verified)) return;
+    const intervalId = setInterval(async () => {
+      try {
+        const res = await reviewersAPI.getMyApplication();
+        setMyApp(res.data);
+      } catch (_e) {
+        // Ignore transient errors; the next tick will retry.
+      }
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [myApp?.application_status, myApp?.email_verified]);
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -149,23 +196,49 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
         </header>
 
         {/* Status Messages */}
-        {success && (
-          <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #10b981', padding: '20px' }}>
-              <h3 style={{ color: '#059669', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {myApp?.application_status === 'pending' && !myApp?.email_verified && (
+          <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #f59e0b', padding: '20px' }}>
+              <h3 style={{ color: '#d97706', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                      <polyline points="22,6 12,13 2,6"></polyline>
                   </svg>
-                  Application Submitted
+                  Verify your institutional email
               </h3>
-              <p style={{ color: '#374151' }}>Your application is now pending admin review. We'll verify your institutional affiliation shortly.</p>
+              <p style={{ color: '#374151' }}>
+                  We sent a verification link to <strong>{myApp.institutional_email}</strong>.
+                  Click the link in your inbox to verify your email — your application stays
+                  invisible to admins until that's done. The link expires in 24 hours.
+              </p>
+              <div style={{ marginTop: '12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                      type="button"
+                      className="dashboard-view-link"
+                      onClick={handleResend}
+                      disabled={resending}
+                      style={{ display: 'inline-flex' }}
+                  >
+                      {resending ? 'Resending...' : 'Resend verification link'}
+                  </button>
+                  {resendInfo && (
+                      <span style={{ fontSize: '13px', color: '#64748b' }}>{resendInfo}</span>
+                  )}
+              </div>
           </div>
         )}
 
-        {myApp?.application_status === 'pending' && !success && (
-            <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #f59e0b', padding: '20px' }}>
-                <h3 style={{ color: '#d97706', marginBottom: '4px' }}>Application Pending</h3>
-                <p style={{ color: '#374151' }}>You submitted an application on {new Date(myApp.submitted_at).toLocaleDateString()}. It is currently awaiting admin approval.</p>
+        {myApp?.application_status === 'pending' && myApp?.email_verified && (
+            <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #10b981', padding: '20px' }}>
+                <h3 style={{ color: '#059669', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    Email verified — pending admin review
+                </h3>
+                <p style={{ color: '#374151' }}>
+                    Your institutional email is verified. You submitted an application on {new Date(myApp.submitted_at).toLocaleDateString()}; it is now awaiting admin approval.
+                </p>
             </div>
         )}
 
@@ -317,9 +390,11 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
             </svg>
           </button>
           <div className="dashboard-user-menu">
-            <div className="dashboard-avatar" onClick={() => setShowUserMenu(!showUserMenu)}>
-              <img src={`https://ui-avatars.com/api/?name=${user?.username || 'User'}&background=1e40af&color=fff`} alt="User" />
-            </div>
+            <Avatar
+              name={user?.username || 'User'}
+              className="dashboard-avatar"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+            />
             {showUserMenu && (
               <div className="dashboard-dropdown">
                 <button className="dashboard-dropdown-item" onClick={() => navigate('/profile')}>
@@ -357,23 +432,49 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
         </header>
 
         <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-            {success && (
-            <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #10b981', padding: '20px' }}>
-                <h3 style={{ color: '#059669', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {myApp?.application_status === 'pending' && !myApp?.email_verified && (
+            <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #f59e0b', padding: '20px' }}>
+                <h3 style={{ color: '#d97706', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                        <polyline points="22,6 12,13 2,6"></polyline>
                     </svg>
-                    Application Submitted
+                    Verify your institutional email
                 </h3>
-                <p style={{ color: '#374151' }}>Your application is now pending admin review. We'll verify your institutional affiliation shortly.</p>
+                <p style={{ color: '#374151' }}>
+                    We sent a verification link to <strong>{myApp.institutional_email}</strong>.
+                    Click the link in your inbox to verify your email — your application stays
+                    invisible to admins until that's done. The link expires in 24 hours.
+                </p>
+                <div style={{ marginTop: '12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        className="dashboard-view-link"
+                        onClick={handleResend}
+                        disabled={resending}
+                        style={{ display: 'inline-flex' }}
+                    >
+                        {resending ? 'Resending...' : 'Resend verification link'}
+                    </button>
+                    {resendInfo && (
+                        <span style={{ fontSize: '13px', color: '#64748b' }}>{resendInfo}</span>
+                    )}
+                </div>
             </div>
             )}
 
-            {myApp?.application_status === 'pending' && !success && (
-                <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #f59e0b', padding: '20px' }}>
-                    <h3 style={{ color: '#d97706', marginBottom: '4px' }}>Application Pending</h3>
-                    <p style={{ color: '#374151' }}>You submitted an application on {new Date(myApp.submitted_at).toLocaleDateString()}. It is currently awaiting admin approval.</p>
+            {myApp?.application_status === 'pending' && myApp?.email_verified && (
+                <div className="dashboard-card" style={{ marginBottom: '24px', borderLeft: '4px solid #10b981', padding: '20px' }}>
+                    <h3 style={{ color: '#059669', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        Email verified — pending admin review
+                    </h3>
+                    <p style={{ color: '#374151' }}>
+                        Your institutional email is verified. You submitted an application on {new Date(myApp.submitted_at).toLocaleDateString()}; it is now awaiting admin approval.
+                    </p>
                 </div>
             )}
 

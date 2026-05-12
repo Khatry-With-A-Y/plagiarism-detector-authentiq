@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
+import Avatar from '../../components/Avatar';
 import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
 import './userStatistics.css';
 
@@ -225,9 +226,11 @@ function UserStatistics({ isEmbedded = false }) {
             </svg>
           </button>
           <div className="ustats-user-menu">
-            <div className="ustats-avatar" onClick={() => setShowUserMenu(!showUserMenu)}>
-              <img src="https://ui-avatars.com/api/?name=User&background=1e40af&color=fff" alt="User" />
-            </div>
+            <Avatar
+              name="User"
+              className="ustats-avatar"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+            />
             {showUserMenu && (
               <div className="ustats-dropdown">
                 <button className="ustats-dropdown-item" onClick={() => navigate('/profile')}>

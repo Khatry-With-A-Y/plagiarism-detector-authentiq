@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import useAuth from '../../hooks/useAuth';
+import Avatar from '../../components/Avatar';
 import { adminAPI } from '../../api/results';
 import '../dashboard.css';
 import './userManagement.css';
@@ -11,6 +12,9 @@ function UserManagement({ isEmbedded = false }) {
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [usersList, setUsersList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,8 +31,20 @@ function UserManagement({ isEmbedded = false }) {
     fetchUsers();
   }, []);
 
-  // Calculate max activity for normalization
-  const maxActivity = usersList.length > 0 ? Math.max(...usersList.map(u => u.activity || 0)) : 1;
+  // Filter users by search query, role and status
+  const filteredUsers = usersList.filter((u) => {
+    const query = searchQuery.trim().toLowerCase();
+    const matchesQuery =
+      query === '' ||
+      (u.username && u.username.toLowerCase().includes(query)) ||
+      (u.email && u.email.toLowerCase().includes(query));
+    const matchesRole = roleFilter === 'all' || u.role === roleFilter;
+    const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
+    return matchesQuery && matchesRole && matchesStatus;
+  });
+
+  // Calculate max activity for normalization (based on filtered list)
+  const maxActivity = filteredUsers.length > 0 ? Math.max(...filteredUsers.map(u => u.activity || 0)) || 1 : 1;
 
   const handleLogout = () => {
     logout();
@@ -53,10 +69,10 @@ function UserManagement({ isEmbedded = false }) {
   };
 
   const toggleAllUsers = () => {
-    if (usersList.length > 0 && selectedUsers.length === usersList.length) {
+    if (filteredUsers.length > 0 && selectedUsers.length === filteredUsers.length) {
       setSelectedUsers([]);
     } else {
-      setSelectedUsers(usersList.map(u => u.id));
+      setSelectedUsers(filteredUsers.map(u => u.id));
     }
   };
 
@@ -122,9 +138,11 @@ function UserManagement({ isEmbedded = false }) {
             </svg>
           </button>
           <div className="dashboard-user-menu">
-            <div className="dashboard-avatar" onClick={() => setShowUserMenu(!showUserMenu)}>
-              <img src="https://ui-avatars.com/api/?name=Admin&background=1e40af&color=fff" alt="User" />
-            </div>
+            <Avatar
+              name="Admin"
+              className="dashboard-avatar"
+              onClick={() => setShowUserMenu(!showUserMenu)}
+            />
             {showUserMenu && (
               <div className="dashboard-dropdown">
                 <button className="dashboard-dropdown-item" onClick={() => navigate('/profile')}>
@@ -164,20 +182,32 @@ function UserManagement({ isEmbedded = false }) {
               <circle cx="11" cy="11" r="8"></circle>
               <path d="M21 21l-4.35-4.35"></path>
             </svg>
-            <input type="text" placeholder="Search name or email address" />
+            <input
+              type="text"
+              placeholder="Search name or email address"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
-          <button className="usermgmt-filter-dropdown">
-            Role: All
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-          <button className="usermgmt-filter-dropdown">
-            Status: All
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
+          <select
+            className="usermgmt-filter-dropdown"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+          >
+            <option value="all">Role: All</option>
+            <option value="admin">Role: Admin</option>
+            <option value="reviewer">Role: Reviewer</option>
+            <option value="user">Role: User</option>
+          </select>
+          <select
+            className="usermgmt-filter-dropdown"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">Status: All</option>
+            <option value="active">Status: Active</option>
+            <option value="blocked">Status: Blocked</option>
+          </select>
         </div>
 
         {/* Table */}
@@ -189,7 +219,7 @@ function UserManagement({ isEmbedded = false }) {
                   <input
                     type="checkbox"
                     className="usermgmt-checkbox"
-                    checked={usersList.length > 0 && selectedUsers.length === usersList.length}
+                    checked={filteredUsers.length > 0 && selectedUsers.length === filteredUsers.length}
                     onChange={toggleAllUsers}
                   />
                 </th>
@@ -206,12 +236,12 @@ function UserManagement({ isEmbedded = false }) {
                 <tr>
                   <td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>Loading users...</td>
                 </tr>
-              ) : usersList.length === 0 ? (
+              ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>No users found.</td>
                 </tr>
               ) : (
-                usersList.map((userItem) => (
+                filteredUsers.map((userItem) => (
                   <tr key={userItem.id}>
                     <td>
                       <input
@@ -223,10 +253,11 @@ function UserManagement({ isEmbedded = false }) {
                     </td>
                     <td>
                       <div className="usermgmt-user-cell">
-                        <img
-                          src={`https://ui-avatars.com/api/?name=${encodeURIComponent(userItem.username || 'User')}&background=${userItem.role === 'admin' ? '1e40af' : userItem.role === 'reviewer' ? '166534' : '6b7280'}&color=fff`}
-                          alt={userItem.username}
+                        <Avatar
+                          name={userItem.username || 'User'}
                           className="usermgmt-avatar"
+                          background={userItem.role === 'admin' ? '#1e40af' : userItem.role === 'reviewer' ? '#166534' : '#6b7280'}
+                          alt={userItem.username}
                         />
                         <div className="usermgmt-user-info">
                           <span className="usermgmt-user-name">{userItem.username}</span>
@@ -288,7 +319,7 @@ function UserManagement({ isEmbedded = false }) {
           {/* Pagination */}
           <div className="usermgmt-pagination">
             <span className="usermgmt-pagination-info">
-              {usersList.length > 0 ? `1-${usersList.length} of ${usersList.length} users` : '0 users'}
+              {filteredUsers.length > 0 ? `1-${filteredUsers.length} of ${filteredUsers.length} users` : '0 users'}
             </span>
             <div className="usermgmt-pagination-btns">
               <button className="usermgmt-page-btn" disabled>

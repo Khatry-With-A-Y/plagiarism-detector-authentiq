@@ -1,4 +1,5 @@
-from flask import Blueprint, request, jsonify
+import os
+from flask import Blueprint, request, jsonify, send_file
 from ..models.models import Submission, User, SimilarityResult
 from ..utils.auth import require_auth, require_admin, require_reviewer, get_current_user
 from ..utils.serializers import serialize_assignment, serialize_assignment_list
@@ -229,12 +230,22 @@ def get_assignment_detail(submission_id):
                 match_details = _json.loads(r['match_details'])
             except Exception:
                 pass
+        # Stage 1: expose per-sentence evidence (same data the user sees on
+        # Results.jsx) so the reviewer can verify suspect phrases against
+        # the corpus. Keep only the keys the UI consumes (`matches` and
+        # `submission_highlight_ranges`) to keep the payload bounded.
+        slim_details = {
+            'matches': match_details.get('matches', []) or [],
+            'submission_highlight_ranges':
+                match_details.get('submission_highlight_ranges', []) or [],
+        }
         top_matches.append({
             'paper_id':         r['paper_id'],
             'title':            r.get('title', ''),
             'author':           r.get('author', ''),
             'similarity_score': r['similarity_score'],
             'highest_match':    match_details.get('highest_match_score', 0),
+            'match_details':    slim_details,
         })
 
     # Attach submission text (for reviewer to read)
@@ -316,6 +327,45 @@ def decline_assignment(submission_id):
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': f'Decline failed: {str(e)}'}), 500
+
+
+@reviews_bp.route('/assignments/<int:submission_id>/file', methods=['GET'])
+@require_reviewer
+def get_assignment_file(submission_id):
+    """Stream the original uploaded PDF for a reviewer's active assignment.
+
+    Stage 1: auth-gated PDF stream so the reviewer's two-pane page can embed
+    the original document via a Bearer-protected blob URL. Authorization:
+      * admins always allowed,
+      * reviewers allowed iff they have an active assignment for this
+        submission (status in {assigned, accepted, voted}); declined and
+        expired assignments are denied.
+    Returns 403 when not authorized, 404 when the file is missing on disk.
+    """
+    user = get_current_user()
+    submission = Submission.get_by_id(submission_id)
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+
+    is_admin = user.get('role') == 'admin'
+    if not is_admin:
+        detail = Submission.get_assignment_detail(submission_id, user['id'])
+        if not detail:
+            return jsonify({'error': 'Access denied'}), 403
+        active_states = ('assigned', 'accepted', 'voted')
+        if detail.get('assignment_status') not in active_states:
+            return jsonify({'error': 'Access denied'}), 403
+
+    file_path = submission.get('file_path')
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({'error': 'Original file is unavailable'}), 404
+
+    return send_file(
+        file_path,
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name=submission.get('filename') or 'submission.pdf',
+    )
 
 
 @reviews_bp.route('/submissions/<int:submission_id>/panel', methods=['GET'])

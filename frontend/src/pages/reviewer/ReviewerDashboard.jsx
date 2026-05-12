@@ -198,6 +198,8 @@ export default function ReviewerDashboard() {
       await reviewsAPI.acceptAssignment(submissionId);
       fetchAssignments();
       fetchCounts();
+      // Block 7: notify the navbar badge so it updates immediately.
+      window.dispatchEvent(new Event('reviews:summary-refresh'));
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to accept assignment.';
       setRowError(prev => ({ ...prev, [submissionId]: msg }));
@@ -216,6 +218,8 @@ export default function ReviewerDashboard() {
       setDeclineFor(null);
       fetchAssignments();
       fetchCounts();
+      // Block 7: notify the navbar badge so it updates immediately.
+      window.dispatchEvent(new Event('reviews:summary-refresh'));
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to decline assignment.';
       setRowError(prev => ({ ...prev, [submissionId]: msg }));
