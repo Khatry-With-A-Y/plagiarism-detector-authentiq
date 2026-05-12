@@ -116,6 +116,136 @@ def my_application():
     return jsonify(app), 200
 
 
+@reviewers_bp.route('/applications/my/resend-verification', methods=['POST'])
+@require_auth
+def resend_verification():
+    """Resend the institutional-email verification link to the current applicant.
+
+    Enforced by `Reviewer.resend_verification`:
+      - 60s cooldown between two consecutive sends.
+      - 5 sends per rolling 24h window (covers initial /apply + resends + edits).
+    Rate-limit failures return HTTP 429 with a `retry_after` (seconds) payload
+    so the frontend can disable the button and show a live countdown.
+    """
+    user = get_current_user()
+    try:
+        result = Reviewer.resend_verification(user['id'])
+    except ValueError as e:
+        # `Reviewer._check_resend_rate_limit` raises ValueError with
+        # `args = (human_message, {retry_after, reason, ...})`. Using
+        # `str(e)` on such a tuple-args ValueError stringifies the
+        # whole tuple, producing terminal-looking output like
+        # "('Please wait 52 seconds…', {'retry_after': 52, …})".
+        # Pull the human sentence out of args[0] instead so the JSON
+        # `error` payload is a clean, UI-friendly string.
+        msg = e.args[0] if e.args else ''
+        # Rate-limit errors carry an extra structured payload as args[1].
+        details = e.args[1] if len(e.args) > 1 and isinstance(e.args[1], dict) else None
+        if details and 'retry_after' in details:
+            return jsonify({
+                'error':       msg,
+                'retry_after': details['retry_after'],
+                'reason':      details.get('reason'),
+            }), 429
+        if msg == 'not_found':
+            return jsonify({'error': 'No reviewer application found.'}), 404
+        if msg == 'not_pending':
+            return jsonify({
+                'error': 'Verification link can only be resent while the application is pending.'
+            }), 400
+        if msg == 'already_verified':
+            return jsonify({
+                'error': 'Your institutional email is already verified.'
+            }), 400
+        return jsonify({'error': msg or 'Could not resend the verification link.'}), 400
+
+    try:
+        send_verification_email(result['institutional_email'], result['raw_token'])
+    except Exception as e:
+        # The token has been persisted; expose the mailer error so the
+        # user can retry. Note the counter has already been bumped — this
+        # is intentional to prevent abuse via a flapping SMTP relay.
+        return jsonify({
+            'error': f'Verification email could not be sent right now: {e}'
+        }), 500
+
+    return jsonify({
+        'message':             'A new verification link has been sent to your institutional inbox.',
+        'institutional_email': result['institutional_email'],
+    }), 200
+
+
+@reviewers_bp.route('/applications/my/email', methods=['PUT'])
+@require_auth
+def update_application_email():
+    """Let an applicant correct the institutional email on a pending application.
+
+    Body: {"institutional_email": "new@allowed-domain"}.
+
+    Resets `email_verified` to 0, rotates the verification token, and
+    sends a fresh link to the new address (counted against the resend
+    quota — see `Reviewer.update_email`).
+    """
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    new_email = (data.get('institutional_email') or '').strip()
+    if not new_email:
+        return jsonify({'error': 'Missing institutional_email.'}), 400
+
+    try:
+        result = Reviewer.update_email(user['id'], new_email)
+    except ValueError as e:
+        # Same rationale as in `resend_verification`: rate-limit
+        # ValueErrors carry `args = (human_message, {retry_after, ...})`,
+        # so `str(e)` would produce a Python-tuple-looking string. Pull
+        # the human sentence from `args[0]` so the JSON `error` stays UI-friendly.
+        msg = e.args[0] if e.args else ''
+        details = e.args[1] if len(e.args) > 1 and isinstance(e.args[1], dict) else None
+        if details and 'retry_after' in details:
+            return jsonify({
+                'error':       msg,
+                'retry_after': details['retry_after'],
+                'reason':      details.get('reason'),
+            }), 429
+        if msg == 'not_found':
+            return jsonify({'error': 'No reviewer application found.'}), 404
+        if msg == 'not_pending':
+            return jsonify({
+                'error': 'The email can only be changed while the application is pending admin review.'
+            }), 400
+        if msg == 'already_verified':
+            return jsonify({
+                'error': 'Your institutional email is already verified and locked.'
+            }), 400
+        if msg == 'invalid_domain':
+            return jsonify({
+                'error': 'Email domain must belong to an allowed institution.'
+            }), 400
+        if msg == 'same_email':
+            return jsonify({
+                'error': 'This is already the email on your application.'
+            }), 400
+        if msg == 'email_taken':
+            return jsonify({
+                'error': 'That institutional email is already in use by another applicant.'
+            }), 409
+        if msg == 'invalid_email':
+            return jsonify({'error': 'Missing institutional_email.'}), 400
+        return jsonify({'error': msg or 'Could not update the email.'}), 400
+
+    try:
+        send_verification_email(result['institutional_email'], result['raw_token'])
+    except Exception as e:
+        return jsonify({
+            'error': f'Email updated, but the verification message could not be sent: {e}'
+        }), 500
+
+    return jsonify({
+        'message':             'Email updated. A new verification link has been sent to your institutional inbox.',
+        'institutional_email': result['institutional_email'],
+    }), 200
+
+
 @reviewers_bp.route('/verify-email', methods=['POST'])
 @require_auth
 def verify_email():

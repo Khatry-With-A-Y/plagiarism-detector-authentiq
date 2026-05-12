@@ -1290,10 +1290,12 @@ class Reviewer:
             # Look up the previous row (if any) to decide whether re-verification
             # is needed. Email comparison is case-insensitive to match how the
             # institution allowlist check normalises email input.
-            cursor.execute(
-                "SELECT institutional_email, email_verified FROM reviewers WHERE user_id = ?",
-                (user_id,)
-            )
+            cursor.execute('''
+                SELECT institutional_email, email_verified,
+                       last_verification_sent_at, verification_sent_count,
+                       verification_window_started_at
+                FROM reviewers WHERE user_id = ?
+            ''', (user_id,))
             prev = cursor.fetchone()
             same_email = bool(
                 prev
@@ -1304,16 +1306,27 @@ class Reviewer:
             raw_token = None
             token_hash = None
             expires_at = None
+            # Rate-limit counters: only bumped when a token is actually issued.
+            # The initial send from /apply counts toward the daily resend cap
+            # so users can't bypass the quota by re-submitting the form.
+            now_str = None
+            new_count = None
+            window_start = None
             if not already_verified:
                 raw_token, token_hash = generate_token()
                 expires_at = new_expiry()
+                now = datetime.now(timezone.utc)
+                now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+                new_count, window_start = Reviewer._bump_send_counters(prev, now)
 
             expertise_tags_json = json.dumps(expertise_tags)
             cursor.execute('''
                 INSERT INTO reviewers (user_id, institution_domain, institution_name, affiliation,
                                      institutional_email, bio, expertise_tags, application_status, submitted_at,
-                                     email_verified, email_verification_token_hash, email_verification_expires_at)
+                                     email_verified, email_verification_token_hash, email_verification_expires_at,
+                                     last_verification_sent_at, verification_sent_count, verification_window_started_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP,
+                        ?, ?, ?,
                         ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     institution_domain=excluded.institution_domain,
@@ -1342,11 +1355,19 @@ class Reviewer:
                         ELSE NULL
                     END,
                     email_verification_token_hash    = excluded.email_verification_token_hash,
-                    email_verification_expires_at    = excluded.email_verification_expires_at
+                    email_verification_expires_at    = excluded.email_verification_expires_at,
+                    -- Only roll forward send counters when a fresh token was issued.
+                    last_verification_sent_at      = COALESCE(excluded.last_verification_sent_at,
+                                                              reviewers.last_verification_sent_at),
+                    verification_sent_count        = COALESCE(excluded.verification_sent_count,
+                                                              reviewers.verification_sent_count),
+                    verification_window_started_at = COALESCE(excluded.verification_window_started_at,
+                                                              reviewers.verification_window_started_at)
             ''', (
                 user_id, institution_domain, institution_name, affiliation,
                 institutional_email, bio, expertise_tags_json,
                 1 if already_verified else 0, token_hash, expires_at,
+                now_str, new_count, window_start,
             ))
             conn.commit()
             return raw_token  # None when no email needs to be sent
@@ -1510,6 +1531,275 @@ class Reviewer:
             ''', (now, user_id))
             conn.commit()
             return True
+        except ValueError:
+            raise
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
+    # Resend / edit-email rate limit knobs
+    # ------------------------------------------------------------------
+    # Cooldown between two consecutive verification-email sends for the
+    # same applicant. Short enough not to annoy a legitimate user, long
+    # enough to defeat trivial click-spamming.
+    VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
+    # Hard cap on sends per rolling 24h window (covers both the initial
+    # /apply send and any user-triggered resends or email edits).
+    VERIFICATION_RESEND_DAILY_CAP = 5
+    # Window length used for the daily cap.
+    VERIFICATION_RESEND_WINDOW_SECONDS = 24 * 60 * 60
+
+    @staticmethod
+    def _parse_db_timestamp(ts):
+        """Parse a stored UTC timestamp (sqlite TIMESTAMP or ISO 'T' form).
+
+        Returns a timezone-aware `datetime` (UTC) or None if the input is
+        falsy or unparseable.
+        """
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(ts).replace(' ', 'T').rstrip('Z'))
+        except (ValueError, TypeError):
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    @staticmethod
+    def _bump_send_counters(row, now):
+        """Compute the post-send rate-limit counters without enforcing quotas.
+
+        Used by `Reviewer.apply` (the initial send already happens whether
+        or not the limit would be reached, because submitting the form is
+        a discrete user action) so subsequent resends start with an
+        accurate `count` / `window_start`.
+
+        Returns `(new_count, window_start_iso)`.
+        """
+        window_secs = Reviewer.VERIFICATION_RESEND_WINDOW_SECONDS
+        window_start = Reviewer._parse_db_timestamp(row['verification_window_started_at']) if row else None
+        count = int(row['verification_sent_count']) if row and row['verification_sent_count'] is not None else 0
+        if window_start is None or (now - window_start).total_seconds() >= window_secs:
+            window_start = now
+            count = 0
+        return count + 1, window_start.strftime('%Y-%m-%d %H:%M:%S')
+
+    @staticmethod
+    def _check_resend_rate_limit(row, now):
+        """Validate resend quotas for the given reviewer row.
+
+        Returns a tuple `(new_count, window_start_iso)` describing the
+        counters to persist if the send is allowed.
+
+        Raises ValueError with a JSON-safe message and an `args[1]` payload
+        carrying machine-readable details (`retry_after` seconds, the
+        offending limit, etc.) when a quota is exceeded.
+        """
+        cooldown = Reviewer.VERIFICATION_RESEND_COOLDOWN_SECONDS
+        cap = Reviewer.VERIFICATION_RESEND_DAILY_CAP
+        window_secs = Reviewer.VERIFICATION_RESEND_WINDOW_SECONDS
+
+        last_sent = Reviewer._parse_db_timestamp(row['last_verification_sent_at']) if row else None
+        if last_sent is not None:
+            elapsed = (now - last_sent).total_seconds()
+            if elapsed < cooldown:
+                retry_after = int(cooldown - elapsed) + 1
+                err = ValueError(
+                    f"Please wait {retry_after} seconds before requesting another verification email."
+                )
+                err.args = (err.args[0], {'retry_after': retry_after, 'reason': 'cooldown'})
+                raise err
+
+        window_start = Reviewer._parse_db_timestamp(row['verification_window_started_at']) if row else None
+        count = int(row['verification_sent_count']) if row and row['verification_sent_count'] is not None else 0
+        if window_start is None or (now - window_start).total_seconds() >= window_secs:
+            # Window expired (or never started) — start a fresh one.
+            window_start = now
+            count = 0
+
+        if count >= cap:
+            seconds_left = int(window_secs - (now - window_start).total_seconds())
+            if seconds_left < 0:
+                seconds_left = 0
+            err = ValueError(
+                "You've reached the daily limit for verification-email resends. "
+                "Try again in a few hours or contact support if you still can't access your inbox."
+            )
+            err.args = (err.args[0], {
+                'retry_after': seconds_left,
+                'reason': 'daily_cap',
+                'cap': cap,
+            })
+            raise err
+
+        return count + 1, window_start.strftime('%Y-%m-%d %H:%M:%S')
+
+    @staticmethod
+    def resend_verification(user_id):
+        """Re-issue a fresh institutional-email verification token.
+
+        Enforces a per-applicant cooldown and daily cap (see class
+        constants). On success, rotates the stored token hash + expiry
+        and updates the rate-limit counters.
+
+        Returns: a dict {'raw_token': str, 'institutional_email': str}
+        Raises:
+            ValueError("not_found")          - no reviewer row.
+            ValueError("not_pending")        - application is approved/rejected.
+            ValueError("already_verified")   - email already verified, no need to resend.
+            ValueError(<human message>, {'retry_after': int, 'reason': str, ...})
+                                             - cooldown / daily cap hit.
+        """
+        from ..utils.email_verification import generate_token, new_expiry
+
+        now = datetime.now(timezone.utc)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            conn.execute('BEGIN TRANSACTION')
+            cursor.execute('''
+                SELECT institutional_email, application_status, email_verified,
+                       last_verification_sent_at, verification_sent_count,
+                       verification_window_started_at
+                FROM reviewers WHERE user_id = ?
+            ''', (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                conn.rollback()
+                raise ValueError("not_found")
+            if row['application_status'] != 'pending':
+                conn.rollback()
+                raise ValueError("not_pending")
+            if row['email_verified']:
+                conn.rollback()
+                raise ValueError("already_verified")
+
+            new_count, window_start = Reviewer._check_resend_rate_limit(row, now)
+
+            raw_token, token_hash = generate_token()
+            expires_at = new_expiry()
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('''
+                UPDATE reviewers SET
+                    email_verification_token_hash    = ?,
+                    email_verification_expires_at    = ?,
+                    last_verification_sent_at        = ?,
+                    verification_sent_count          = ?,
+                    verification_window_started_at   = ?
+                WHERE user_id = ?
+            ''', (token_hash, expires_at, now_str, new_count, window_start, user_id))
+            conn.commit()
+            return {
+                'raw_token': raw_token,
+                'institutional_email': row['institutional_email'],
+            }
+        except ValueError:
+            raise
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def update_email(user_id, new_email):
+        """Let an applicant correct the institutional email on a pending application.
+
+        Only allowed while the application is `pending` and not yet
+        verified — once approved or verified the email is locked.
+        On success, rotates the verification token, resets `email_verified`
+        to 0, bumps the rate-limit counters (the caller still sends one
+        email, which counts towards the daily cap), and returns the raw
+        token so the route can dispatch the mail.
+
+        Returns: {'raw_token': str, 'institutional_email': str}
+        Raises:
+            ValueError("not_found")          - no reviewer row.
+            ValueError("not_pending")        - application not in 'pending' state.
+            ValueError("already_verified")   - email already verified (use a new application instead).
+            ValueError("invalid_domain")     - the new email doesn't match any allowed institution domain.
+            ValueError("same_email")         - new email matches the existing one (nothing to do).
+            ValueError("email_taken")        - another applicant already uses this email.
+            ValueError(<human message>, {'retry_after': int, ...})
+                                             - rate-limit hit (cooldown / daily cap).
+        """
+        from ..utils.email_verification import generate_token, new_expiry
+
+        new_email = (new_email or '').strip()
+        if not new_email:
+            raise ValueError("invalid_email")
+
+        # Validate against allowed institution domains (subdomain-safe match,
+        # mirrors the check in routes.reviewers.apply).
+        from ...config import ALLOWED_INSTITUTION_DOMAINS
+        new_email_lower = new_email.lower()
+        matched_domain = None
+        for _name, domain in ALLOWED_INSTITUTION_DOMAINS:
+            if new_email_lower.endswith('@' + domain) or new_email_lower.endswith('.' + domain):
+                matched_domain = domain
+                break
+        if not matched_domain:
+            raise ValueError("invalid_domain")
+
+        now = datetime.now(timezone.utc)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            conn.execute('BEGIN TRANSACTION')
+            cursor.execute('''
+                SELECT institutional_email, application_status, email_verified,
+                       last_verification_sent_at, verification_sent_count,
+                       verification_window_started_at
+                FROM reviewers WHERE user_id = ?
+            ''', (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                conn.rollback()
+                raise ValueError("not_found")
+            if row['application_status'] != 'pending':
+                conn.rollback()
+                raise ValueError("not_pending")
+            if row['email_verified']:
+                conn.rollback()
+                raise ValueError("already_verified")
+            if (row['institutional_email'] or '').lower() == new_email_lower:
+                conn.rollback()
+                raise ValueError("same_email")
+
+            # Rate-limit changing the email + sending a fresh link.
+            new_count, window_start = Reviewer._check_resend_rate_limit(row, now)
+
+            raw_token, token_hash = generate_token()
+            expires_at = new_expiry()
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+            try:
+                cursor.execute('''
+                    UPDATE reviewers SET
+                        institutional_email              = ?,
+                        email_verified                   = 0,
+                        email_verified_at                = NULL,
+                        email_verification_token_hash    = ?,
+                        email_verification_expires_at    = ?,
+                        last_verification_sent_at        = ?,
+                        verification_sent_count          = ?,
+                        verification_window_started_at   = ?
+                    WHERE user_id = ?
+                ''', (new_email, token_hash, expires_at, now_str,
+                      new_count, window_start, user_id))
+            except sqlite3.IntegrityError as e:
+                conn.rollback()
+                if "UNIQUE constraint failed: reviewers.institutional_email" in str(e):
+                    raise ValueError("email_taken")
+                raise
+            conn.commit()
+            return {
+                'raw_token': raw_token,
+                'institutional_email': new_email,
+            }
         except ValueError:
             raise
         except Exception:

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import { notificationsAPI } from '../../api/notifications';
+import reviewersAPI from '../../api/reviewers';
 import useAuth from '../../hooks/useAuth';
 import Results from './Results';
 import UserStatistics from './UserStatistics';
@@ -154,6 +155,36 @@ function UserDashboard() {
       setShowReviewerApp(false);
     }
   }, [activeTab, showReviewerApp, reviewerAppSubmitted]);
+
+  // Persist the "Reviewer Application" navbar tab across logout/login and
+  // page reloads for users with an in-flight application. React state is
+  // wiped on logout, so without this the tab would disappear the moment
+  // the user logs back in — even though their application is still
+  // pending admin review. We treat any backend status other than 'none'
+  // (never applied) and 'approved' (role already flipped to 'reviewer', so
+  // this dashboard isn't rendered for them anyway) as "in-flight" and
+  // pin the tab open. `reviewerAppSubmitted=true` also hides the close
+  // `×` button, preventing the user from dismissing the tab before the
+  // admin acts on their submission.
+  useEffect(() => {
+    if (!user || user.role !== 'user') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await reviewersAPI.getMyApplication();
+        if (cancelled) return;
+        const status = res?.data?.application_status;
+        if (status && status !== 'none' && status !== 'approved') {
+          setShowReviewerApp(true);
+          setReviewerAppSubmitted(true);
+        }
+      } catch (_e) {
+        // Non-fatal: if the lookup fails, the user can still open the tab
+        // manually from the dropdown / "Become a Reviewer" button.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   const fetchSubmissions = async () => {
     try {

@@ -52,12 +52,17 @@ import smtplib
 from email.message import EmailMessage
 
 # Best-effort load of backend/.env so local development picks up
-# BREVO_LOGIN / BREVO_SMTP_KEY / BREVO_SENDER automatically. If
-# python-dotenv isn't installed, callers can still export the vars in
-# the shell -- no hard dependency.
+# BREVO_LOGIN / BREVO_SMTP_KEY / BREVO_SENDER automatically. We point
+# load_dotenv() at the file explicitly (instead of relying on cwd
+# discovery) so it works whether the backend is started from `backend/`
+# or from the project root. If python-dotenv isn't installed, callers
+# can still export the vars in the shell -- no hard dependency.
 try:
+    from pathlib import Path
     from dotenv import load_dotenv
-    load_dotenv()
+    # mailer.py lives at backend/app/utils/mailer.py -> backend/.env is
+    # two directories up from this file's parent.
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 except ImportError:
     pass
 

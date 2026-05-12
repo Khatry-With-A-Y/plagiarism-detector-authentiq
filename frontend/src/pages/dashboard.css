@@ -861,21 +861,56 @@
   color: #6b7280;
 }
 
+/* Compact outlined pill-button used across the app for row actions
+   ("View", "Approve", "Reject", pagination Prev/Next) as well as
+   standalone CTAs on the reviewer apply / verify-email pages. Kept on
+   the smaller side so it still fits inside dense table cells, while
+   looking like a real button — not a bare text link. Per-call sites
+   commonly override only `color` (e.g. green for approve, red for
+   reject) or `borderColor`; the white background + neutral border keep
+   those text-color overrides readable. */
 .dashboard-view-link {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  padding: 8px 16px;
+  background-color: #ffffff;
   color: #1e40af;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 500;
-  background: none;
-  border: none;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
   cursor: pointer;
-  transition: color 0.2s;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s,
+    box-shadow 0.2s, transform 0.05s;
 }
 
-.dashboard-view-link:hover {
+.dashboard-view-link:hover:not(:disabled) {
+  background-color: #f1f5f9;
+  border-color: #94a3b8;
   color: #1e3a8a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.dashboard-view-link:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.dashboard-view-link:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}
+
+.dashboard-view-link:disabled,
+.dashboard-view-link[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* Pagination */
@@ -2074,4 +2109,395 @@
     height: 60vh;
     min-height: 400px;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Reviewer application page (`/reviewer/apply` and the embedded dashboard
+ * panel). Re-usable, low-level atoms — kept purely additive so they don't
+ * affect any other page. The redesign uses these to break the previously
+ * flat form into clearly grouped sections, give status messages a
+ * consistent card look, and present the expertise selector as proper chips.
+ * ---------------------------------------------------------------------------
+ */
+
+/* Page-level shell that constrains and centers the apply page content. */
+.apply-shell {
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Generic elevated white card used throughout the apply page (status
+   messages, sectioned form). Replaces the marker-only `.dashboard-card`
+   class with real visual styling so we don't have to inline the same
+   `background`/`border`/`box-shadow` everywhere. */
+.apply-card {
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 24px;
+}
+
+/* Coloured-accent variants — the left border carries the semantic
+   meaning (warning/success/danger/info) at a glance. */
+.apply-card.warning { border-left: 4px solid #f59e0b; }
+.apply-card.success { border-left: 4px solid #10b981; }
+.apply-card.danger  { border-left: 4px solid #ef4444; }
+.apply-card.info    { border-left: 4px solid #3b82f6; }
+
+/* Hero header at the top of the page: eyebrow pill + title + subtitle on
+   the left, optional status chip on the right. */
+.apply-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 28px 28px 24px;
+  background: linear-gradient(135deg, #eef4ff 0%, #f8fafc 100%);
+  border: 1px solid #e0e7ff;
+  border-radius: 14px;
+}
+
+.apply-hero-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.apply-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background-color: #e0e7ff;
+  color: #1e40af;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.apply-hero h1 {
+  font-size: 26px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.apply-hero-subtitle {
+  font-size: 14px;
+  color: #475569;
+  margin: 0;
+  line-height: 1.55;
+  max-width: 640px;
+}
+
+/* Status chip rendered in the hero (top-right). Uses the same colour
+   semantics as `.apply-card` accent variants. */
+.apply-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.apply-status-chip svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.apply-status-chip.info {
+  background-color: #e0f2fe;
+  color: #075985;
+  border: 1px solid #bae6fd;
+}
+
+.apply-status-chip.warning {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.apply-status-chip.success {
+  background-color: #d1fae5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.apply-status-chip.danger {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* Heading row used inside every status card (icon + bold title). */
+.apply-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.apply-card-title.warning { color: #d97706; }
+.apply-card-title.success { color: #059669; }
+.apply-card-title.danger  { color: #dc2626; }
+
+/* Body copy used inside status cards. Slightly relaxed line-height for
+   easier reading of multi-line explanations. */
+.apply-card-body {
+  margin: 0;
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.apply-card-body + .apply-card-body {
+  margin-top: 8px;
+}
+
+/* Sectioned form: each top-level section has its own heading + helper
+   subtitle, so the form reads as three small forms rather than one long
+   flat list. Sections live inside a single `.apply-card`. */
+.apply-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.apply-section + .apply-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.apply-section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.apply-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.1px;
+}
+
+.apply-section-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Two-column responsive grid used to pair related fields
+   (institution + email). Collapses cleanly on narrow viewports.
+
+   `align-items: start` is intentional: the right column has a small
+   `.apply-help-text` paragraph below the input (domain hint), so its
+   `.form-group` is naturally taller than the left one. Without
+   `start`, grid defaults to `stretch` and pulls the two columns out of
+   visual alignment when the user scans label-to-label and field-to-
+   field across the row. With `start`, every child column anchors to
+   the top of the row, so labels share the same baseline and inputs
+   share the same baseline regardless of the right column's helper. */
+.apply-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .apply-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Lock every `.auth-input-field` inside the apply two-column grid to
+   the same computed height so the `<select>` (institution) and the
+   `<input>` (institutional email) align pixel-for-pixel.
+
+   Why this is scoped, not global: `.auth-input-field` is also used on
+   the login / signup / password-reset pages where the surrounding
+   layouts already look correct with the browser-default
+   line-height. We only need parity inside `.apply-grid-2`, where the
+   themed `<select>` sits next to a plain `<input>` and the two
+   browser-native line-heights diverge (`<select>` is forced to
+   `1.5` in the rule below for caret rendering, `<input>` falls back
+   to `normal` ≈ 1.15). Matching them to `1.5` + `border-box` keeps
+   both fields at the exact same height, which also means the labels
+   above them and the input baselines line up across the row. */
+.apply-grid-2 .auth-input-field {
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+/* Vertically nudge the institutional-email <input>'s text down by ~2px
+   so its baseline visually lines up with the institution <select>'s
+   value text in the same .apply-grid-2 row.
+
+   Why this is needed even though both fields share padding / font-size
+   / line-height: browsers render native <select> value text as a
+   replaced-element widget and vertically *center* it inside the
+   content box regardless of `line-height`. An <input>, by contrast,
+   places its text at the top of its line-box, so it sits ~1–2px
+   higher than the select's value text — visible as a misaligned
+   horizontal baseline between the two fields side-by-side.
+
+   The fix shifts the input's text down by 2px without changing the
+   overall field height: top padding +2px (12 → 14), bottom padding
+   -2px (12 → 10). Total padding-block stays at 24px, so the input's
+   computed height is identical to the select's and the row's
+   labels-and-fields alignment from the previous fix is preserved.
+
+   Scoped to `input.auth-input-field` (NOT the <select>) inside
+   `.apply-grid-2` only, so the global `.auth-input-field` on login /
+   signup / password-reset pages stays untouched. */
+.apply-grid-2 input.auth-input-field {
+  padding-top: 14px;
+  padding-bottom: 10px;
+}
+
+/* Smaller helper text shown below an input (e.g. domain hint, char
+   counter). Doesn't compete with `.form-label`. */
+.apply-help-text {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.apply-help-text.error  { color: #b91c1c; }
+.apply-help-text.muted  { color: #94a3b8; }
+
+/* Pill-shaped chip used by the expertise selector. Looks like a real
+   selectable token — not a passive badge. The `.locked` variant carries
+   the P0-required hint and a small lock icon slot. */
+.apply-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background-color: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: default;
+  user-select: none;
+}
+
+.apply-chip.locked {
+  background-color: #eef2ff;
+  color: #3730a3;
+  border-color: #c7d2fe;
+}
+
+.apply-chip svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+/* Action footer at the bottom of the form: secondary text on the left,
+   primary submit button on the right. */
+.apply-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #f1f5f9;
+  flex-wrap: wrap;
+}
+
+.apply-footer-note {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 520px;
+}
+
+.apply-submit-btn {
+  /* Layered on top of `.auth-submit-btn`: sized to fit naturally next to
+     the footer note instead of stretching full-width. */
+  width: auto;
+  min-width: 200px;
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------
+   <select>.auth-input-field — visual sync with sibling <input> fields
+   ---------------------------------------------------------------------
+   Native <select> rendering differs from <input>: browsers add their
+   own dropdown caret, override font-family / line-height, and apply
+   their own internal padding around the value. Even with identical
+   `.auth-input-field` declarations a `<select>` ends up visibly out of
+   sync with a sibling `<input>` (e.g. institution vs. institutional
+   email on the reviewer apply page).
+
+   This rule strips the native chrome, locks the box model to match the
+   text inputs (border-box, inherited font, 15px / 1.5 line-height),
+   and renders a small custom caret on the right via a background SVG.
+   The result is pixel-aligned with sibling text inputs in any
+   `.apply-grid-2` row, and any other `select.auth-input-field` in the
+   admin pages picks up the same consistent themed caret.
+   ---------------------------------------------------------------------*/
+select.auth-input-field {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  /* Reserve room on the right for the custom caret without nudging the
+     value text. Left padding stays at the `.auth-input-field` default
+     (14px) so labels line up with sibling inputs. */
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 8 10 12 14 8'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px 16px;
+  /* `<select>` is a dropdown trigger, not a text caret target. Forced
+     with !important to overpower `.auth-input-field { cursor: text
+     !important }`. */
+  cursor: pointer !important;
+}
+
+select.auth-input-field:hover {
+  cursor: pointer !important;
+}
+
+select.auth-input-field:focus {
+  /* Tint the caret to match the focused border colour. */
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%231e40af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 8 10 12 14 8'/%3e%3c/svg%3e");
+}
+
+/* Remove the dotted focus ring some browsers (older Firefox) still
+   render on top of the value text. */
+select.auth-input-field::-ms-expand {
+  display: none;
 }

@@ -387,6 +387,33 @@ def init_database():
         cursor.execute("ALTER TABLE reviewers ADD COLUMN email_verification_expires_at TIMESTAMP")
         print("Added email_verification_expires_at column to reviewers table")
 
+    # ----------------------------------------------------------------------
+    # Migration: verification-link resend rate limiting
+    # ----------------------------------------------------------------------
+    # Adds 3 nullable columns to `reviewers` to throttle the "Resend
+    # verification link" button so it can't be abused (mailbox flooding,
+    # mailer cost, or spam-flagging the institutional domain).
+    #
+    # Columns:
+    #   - last_verification_sent_at      TIMESTAMP  (UTC, last send)
+    #   - verification_sent_count        INTEGER NOT NULL DEFAULT 0
+    #   - verification_window_started_at TIMESTAMP  (UTC, start of the current 24h window)
+    #
+    # The model layer enforces:
+    #   - a short per-send cooldown (60s)
+    #   - a daily cap (5 sends per rolling 24h window)
+    # The initial send from /apply also bumps the counter, so the user
+    # can't get a 6th email simply by editing the email field repeatedly.
+    if 'last_verification_sent_at' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN last_verification_sent_at TIMESTAMP")
+        print("Added last_verification_sent_at column to reviewers table")
+    if 'verification_sent_count' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN verification_sent_count INTEGER NOT NULL DEFAULT 0")
+        print("Added verification_sent_count column to reviewers table")
+    if 'verification_window_started_at' not in rev_cols:
+        cursor.execute("ALTER TABLE reviewers ADD COLUMN verification_window_started_at TIMESTAMP")
+        print("Added verification_window_started_at column to reviewers table")
+
     # Index on submissions.review_status for fast admin-queue filters.
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_submissions_review_status ON submissions(review_status)')
 
