@@ -21,6 +21,14 @@ if __package__ is None or __package__ == "":
 
 from backend.app.utils.text_processing import TextProcessor  # noqa: E402
 from backend.app.utils.tfidf import TFIDFCalculator  # noqa: E402
+
+try:
+    import numpy as np
+    import scipy.sparse as sp
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    _SCIPY_AVAILABLE = False
+
 from backend.benchmark.config import (  # noqa: E402
     ARTIFACTS_DIR,
     DEFAULT_MAX_WORDS,
@@ -86,12 +94,19 @@ def _load_cache(path: Path) -> dict:
             "norm": row[4],
         }
     
+    matrix_path = path.with_name(path.stem + "_matrix.npz")
+    meta_path = path.with_name(path.stem + "_meta.npz")
+    has_npz = _SCIPY_AVAILABLE and matrix_path.exists() and meta_path.exists()
+
     return {
         "conn": conn,
         "metadata": meta,
         "documents": documents,
         "variant": meta.get("variant"),
         "n_values": tuple(meta.get("n_values", [1])),
+        "has_npz": has_npz,
+        "matrix_path": matrix_path,
+        "meta_path": meta_path,
     }
 
 
@@ -276,6 +291,61 @@ def _rank_sources(
     return scored[:top_k], len(dot_scores)
 
 
+def _rank_sources_csr(
+    query_terms: list[str],
+    idf: dict,
+    documents: dict,
+    n_values: tuple[int, ...],
+    top_k: int,
+    csr_matrix,
+    term_to_idx: dict,
+    doc_norms,
+) -> tuple[list[tuple[int, float]], int]:
+    """BLAS-backed sparse GEMV ranking using a prebuilt CSR matrix.
+
+    Returns (scored[:top_k], nonzero_doc_count) matching _rank_sources contract.
+    """
+    if not query_terms:
+        return [], 0
+
+    tf = TFIDFCalculator.compute_tf(query_terms)
+    num_docs = len(documents)
+    default_idf = math.log(max(num_docs, 1))
+
+    q_indices = []
+    q_data = []
+    norm_query_sq = 0.0
+    for term, tf_value in tf.items():
+        idf_value = idf.get(term, default_idf)
+        w = tf_value * idf_value
+        if w <= 0:
+            continue
+        t_idx = term_to_idx.get(term)
+        if t_idx is None:
+            continue
+        q_indices.append(t_idx)
+        q_data.append(w)
+        norm_query_sq += w * w
+
+    norm_query = math.sqrt(norm_query_sq)
+    if norm_query == 0:
+        return [], 0
+
+    q_vec = sp.csr_matrix(
+        (q_data, ([0] * len(q_indices), q_indices)),
+        shape=(1, csr_matrix.shape[0]),
+        dtype=np.float32,
+    )
+    dot_scores = np.asarray(q_vec.dot(csr_matrix).todense()).ravel()  # shape: (n_docs,)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        scores = np.where(doc_norms > 0, dot_scores / (norm_query * doc_norms), 0.0)
+
+    top_idx = np.argsort(scores)[::-1][:top_k]
+    scored = [(int(i), float(scores[i])) for i in top_idx if scores[i] > 0]
+    return scored, int(np.count_nonzero(dot_scores))
+
+
 def _build_sentence_vectors(
     text: str,
     conn_or_idf: sqlite3.Connection | dict,
@@ -373,22 +443,38 @@ def _init_worker(cache_path: Path, lsh_path: Path | None = None) -> None:
         cache["idf_dict"] = dict(idf_rows)
         cache["idf"] = cache["idf_dict"]
 
-        # Load entire postings table into a RAM dict so retrieval uses the fast
-        # in-memory path (dict.get) instead of per-query SQLite chunk scans.
-        # For B2T3/U1B2/U1B2T3 with min_df=10 this is ~2-20M rows (~100-500 MB RAM)
-        # but reduces per-doc retrieval from seconds to milliseconds.
-        print("[worker-init] Loading postings into RAM...", flush=True)
-        postings: dict[str, list[tuple[int, float]]] = defaultdict(list)
-        for term, doc_idx, weight in conn.execute(
-            "SELECT term, doc_idx, weight FROM postings"
-        ).fetchall():
-            postings[term].append((doc_idx, weight))
-        cache["postings"] = dict(postings)
-        print(f"[worker-init] Loaded {len(postings):,} terms into RAM.", flush=True)
+        if cache.get("has_npz"):
+            # Fast path: load prebuilt scipy.sparse CSR matrix instead of the slow
+            # SQLite postings scan (~28s). Worker init should complete in ~0.5-2s.
+            t0 = time.perf_counter()
+            print(f"[worker-init] Loading CSR matrix from {cache['matrix_path']}...", flush=True)
+            csr_matrix = sp.load_npz(str(cache["matrix_path"]))
+            npz = np.load(str(cache["meta_path"]), allow_pickle=False)
+            terms = npz["terms"].tolist()
+            cache["term_to_idx"] = {t: i for i, t in enumerate(terms)}
+            cache["csr_matrix"] = csr_matrix   # shape: (n_terms, n_docs)
+            cache["doc_norms"] = npz["doc_norms"]
+            conn.close()
+            cache["conn"] = None
+            elapsed = time.perf_counter() - t0
+            print(f"[worker-init] CSR matrix loaded: shape={csr_matrix.shape} in {elapsed:.1f}s", flush=True)
+        else:
+            # Fallback: load entire postings table into a RAM dict so retrieval uses the
+            # fast in-memory path (dict.get) instead of per-query SQLite chunk scans.
+            # For B2T3/U1B2/U1B2T3 with min_df=10 this is ~2-20M rows (~100-500 MB RAM)
+            # but reduces per-doc retrieval from seconds to milliseconds.
+            print("[worker-init] Loading postings into RAM...", flush=True)
+            postings: dict[str, list[tuple[int, float]]] = defaultdict(list)
+            for term, doc_idx, weight in conn.execute(
+                "SELECT term, doc_idx, weight FROM postings"
+            ).fetchall():
+                postings[term].append((doc_idx, weight))
+            cache["postings"] = dict(postings)
+            print(f"[worker-init] Loaded {len(postings):,} terms into RAM.", flush=True)
 
-        # Close the connection — all data is now in RAM; workers no longer need SQLite.
-        conn.close()
-        cache["conn"] = None
+            # Close the connection — all data is now in RAM; workers no longer need SQLite.
+            conn.close()
+            cache["conn"] = None
 
     if lsh_path is not None and lsh_path.exists():
         cache["lsh"], cache["lsh_minhash"] = _load_lsh_index(lsh_path)
@@ -509,6 +595,17 @@ def _worker_benchmark_task(item: tuple) -> tuple:
             ranked, candidate_count = _rank_sources_lsh(conn, query_terms, documents, n_values, top_k, lsh)
         elif conn:
             ranked, candidate_count = _rank_sources(conn, query_terms, documents, None, n_values, top_k)
+        elif _worker_cache.get("csr_matrix") is not None:
+            ranked, candidate_count = _rank_sources_csr(
+                query_terms,
+                _worker_cache["idf"],
+                documents,
+                n_values,
+                top_k,
+                _worker_cache["csr_matrix"],
+                _worker_cache["term_to_idx"],
+                _worker_cache["doc_norms"],
+            )
         else:
             idf = _worker_cache["idf"]
             postings = _worker_cache["postings"]

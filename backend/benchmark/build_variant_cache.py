@@ -202,6 +202,13 @@ def build_cache(
     duplicate_name_count = 0
     seen_names: set[str] = set()
     postings_buffer = []
+    # Parallel lists for CSR matrix construction (accumulated alongside SQLite writes)
+    csr_rows: list[int] = []
+    csr_cols: list[int] = []
+    csr_data: list[float] = []
+    csr_term_to_idx: dict[str, int] = {}
+    # Per-doc norms (indexed by doc_idx) for meta file
+    doc_norms_list: list[float] = []
 
     with multiprocessing.Pool(processes=jobs) as pool:
         worker_fn = partial(_worker_pass2, n_values=n_values, max_words=max_words)
@@ -223,8 +230,14 @@ def build_cache(
                     if weight > 0:
                         postings_buffer.append((term, doc_idx, weight))
                         norm_sq += weight * weight
+                        # Accumulate CSR triple
+                        t_idx = csr_term_to_idx.setdefault(term, len(csr_term_to_idx))
+                        csr_rows.append(t_idx)
+                        csr_cols.append(doc_idx)
+                        csr_data.append(weight)
                 
                 doc_norm = math.sqrt(norm_sq)
+                doc_norms_list.append(doc_norm)
                 conn.execute(
                     "INSERT INTO documents VALUES (?, ?, ?, ?, ?)",
                     (doc_idx, source_file, str(path.relative_to(source_dir)), str(path), doc_norm)
@@ -249,6 +262,28 @@ def build_cache(
     
     conn.commit()
     conn.close()
+
+    # Emit companion scipy.sparse files
+    matrix_path = output.with_name(output.stem + "_matrix.npz")
+    meta_path = output.with_name(output.stem + "_meta.npz")
+    try:
+        import numpy as np
+        import scipy.sparse as sp
+
+        matrix = sp.csr_matrix(
+            (csr_data, (csr_rows, csr_cols)),
+            shape=(len(csr_term_to_idx), documents_count),
+            dtype=np.float32,
+        )
+        sp.save_npz(str(matrix_path), matrix)
+        np.savez_compressed(
+            str(meta_path),
+            terms=np.array(list(csr_term_to_idx.keys())),
+            doc_norms=np.array(doc_norms_list, dtype=np.float32),
+        )
+        print(f"Cache NPZ written: {matrix_path} (matrix shape: {len(csr_term_to_idx)} x {documents_count})")
+    except ImportError:
+        print("Warning: scipy/numpy not installed — skipping companion .npz files. Install with: pip install scipy numpy")
 
     elapsed = time.perf_counter() - started
     print(f"Cache written (SQLite): {output}")

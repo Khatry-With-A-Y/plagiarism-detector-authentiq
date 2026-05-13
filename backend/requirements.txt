@@ -25,3 +25,5 @@ urllib3==2.6.3
 Werkzeug==3.0.1
 nltk==3.9.1
 datasketch>=1.6.0
+numpy>=1.24.0
+scipy>=1.10.0
