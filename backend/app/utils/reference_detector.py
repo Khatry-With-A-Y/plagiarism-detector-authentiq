@@ -81,7 +81,7 @@ class ReferenceDetector:
         # OPTIMIZATION 3: Quick keyword check before regex
         upper_text = search_region.upper()
         has_keywords = any(kw in upper_text for kw in 
-                          ['REFERENCES', 'BIBLIOGRAPHY', 'WORKS CITED'])
+                          ['REFERENCE', 'BIBLIOGRAPHY', 'WORKS CITED', 'LITERATURE CITED'])
         if not has_keywords:
             return None
         
