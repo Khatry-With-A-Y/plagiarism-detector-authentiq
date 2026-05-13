@@ -1838,8 +1838,11 @@ class Reviewer:
             # The initial send from /apply counts toward the daily resend cap
             # so users can't bypass the quota by re-submitting the form.
             now_str = None
-            new_count = None
-            window_start = None
+            # Default to existing values to satisfy NOT NULL constraints during
+            # the INSERT phase of the UPSERT, even if we're only updating.
+            new_count = prev['verification_sent_count'] if prev else 0
+            window_start = prev['verification_window_started_at'] if prev else None
+
             if not already_verified:
                 raw_token, token_hash = generate_token()
                 expires_at = new_expiry()
