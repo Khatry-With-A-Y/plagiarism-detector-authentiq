@@ -128,7 +128,7 @@ def promote_submission(
 
         content_hash = _compute_content_hash(canonical_text)
 
-        # Duplicate-content-hash guard (Block 6 acceptance test).
+        # Duplicate-content-hash guard.
         if not force:
             dup = cur.execute(
                 "SELECT id FROM papers WHERE content_hash = ? LIMIT 1",

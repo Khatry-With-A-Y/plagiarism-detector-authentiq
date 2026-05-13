@@ -215,10 +215,9 @@ def init_database():
         cursor.execute("ALTER TABLE papers ADD COLUMN has_references INTEGER DEFAULT 0")
         print("Added has_references column to papers table")
 
-    # Migration (Block 1): peer-review provenance columns on papers.
-    # With the one-table design, review requests live on `submissions`; a
-    # promoted paper links back via `submission_id` so we retain provenance
-    # without needing a review_requests table.
+    # Migration: peer-review provenance columns on papers. Review requests
+    # live on `submissions`; a promoted paper links back via `submission_id`
+    # to retain provenance without a separate review_requests table.
     if 'source' not in paper_columns:
         cursor.execute(
             "ALTER TABLE papers ADD COLUMN source TEXT DEFAULT 'corpus_upload' "
@@ -267,13 +266,10 @@ def init_database():
         cursor.execute("ALTER TABLE submissions ADD COLUMN has_references INTEGER DEFAULT 0")
         print("Added has_references column to submissions table")
 
-    # Migration (Block 1): peer-review fields absorbed into submissions.
-    # In the one-table design, a submission *is* the review request. The
-    # optional `review_status` discriminates: NULL means no review requested;
-    # any non-null value indicates the review lifecycle state.
-    # Note: ALTER TABLE ADD COLUMN in SQLite cannot attach CHECK constraints,
-    # so the CHECK values below live in the API layer (see
-    # backend/config.py::DOMAIN_TAGS and the /api/reviews routes).
+    # Migration: peer-review fields absorbed into submissions. A submission
+    # is the review request; `review_status` discriminates (NULL = no review
+    # requested). CHECK constraints live in the API layer since SQLite's
+    # ALTER TABLE ADD COLUMN cannot attach them.
     if 'domain_tag' not in submission_columns:
         cursor.execute(
             "ALTER TABLE submissions ADD COLUMN domain_tag TEXT NOT NULL DEFAULT 'CS'"
@@ -326,9 +322,9 @@ def init_database():
         cursor.execute("ALTER TABLE submissions ADD COLUMN admin_decision_reason TEXT")
         print("Added admin_decision_reason column to submissions table")
     if 'pool_breakdown' not in submission_columns:
-        # Block 7 (Stage 7b): JSON dict written by `Submission.assign_many`
-        # whenever the pool flips to `insufficient_pool`. Stored so the admin
-        # queue can render the breakdown without re-running assignment.
+        # JSON dict written by `Submission.assign_many` when the pool flips
+        # to `insufficient_pool`; stored so the admin queue can render the
+        # breakdown without re-running assignment.
         cursor.execute("ALTER TABLE submissions ADD COLUMN pool_breakdown TEXT")
         print("Added pool_breakdown column to submissions table")
     
@@ -376,22 +372,10 @@ def init_database():
         cursor.execute("ALTER TABLE similarity_results ADD COLUMN match_details TEXT")
         print("Added match_details column to similarity_results table")
 
-    # ----------------------------------------------------------------------
-    # Block 1: Peer-review & reviewer-role schema (one-table design)
-    # ----------------------------------------------------------------------
-    # Per plan §Schema Minimization, all peer-review data lives in:
-    #   - `users`               (role CHECK extended to include 'reviewer')
-    #   - `submissions`         (absorbs the review_request + review_votes JSON)
-    #   - `papers`              (provenance columns: source, submission_id, ...)
-    #   - `reviewers` (NEW)     (application + profile + revocation rolled into one)
-    # No institutions/reviewer_profiles/reviewer_expertise/review_requests/
-    # review_assignments/review_vote_history tables are created.
-    #
-    # Note: corpus cache invalidation is handled in-process by
-    # `CorpusCache.invalidate()` calls after each corpus mutation, plus a
-    # 60-second TTL backstop. This is sufficient for the single-process
-    # Flask deployment used here. A versioned counter (e.g. a `meta(key,value)`
-    # row, or Redis INCR) would be required for multi-worker gunicorn.
+    # Peer-review & reviewer-role schema (one-table design). All peer-review
+    # data lives in `users`, `submissions`, `papers`, and `reviewers`.
+    # Corpus cache invalidation is handled in-process via `CorpusCache.invalidate()`
+    # with a 60-second TTL backstop (sufficient for single-process Flask).
 
     # reviewers: single supplementary table keyed on user_id.
     # - Rows exist for anyone who has ever applied (pending/approved/rejected).
@@ -525,9 +509,6 @@ def init_database():
 
     # Partial UNIQUE not needed: a submission has at most one review lifecycle
     # because the state lives in columns on the submission itself.
-    # ----------------------------------------------------------------------
-    # End Block 1 schema
-    # ----------------------------------------------------------------------
 
     conn.commit()
     # seed a default account if none exist

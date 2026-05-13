@@ -45,40 +45,27 @@ const VALID_TAB_KEYS = TABS.map(t => t.key);
 const DEFAULT_TAB = 'pending';
 
 function DeadlineCountdown({ deadlineAt, status }) {
-  const [label, setLabel] = useState('');
-
-  useEffect(() => {
-    if (!deadlineAt || !['assigned', 'accepted'].includes(status)) return;
-    const update = () => {
-      const diff = new Date(deadlineAt) - new Date();
-      if (diff <= 0) { setLabel('Expired'); return; }
-      const h = Math.floor(diff / 3600000);
-      const m = Math.floor((diff % 3600000) / 60000);
-      setLabel(`${h}h ${m}m remaining`);
-    };
-    update();
-    const id = setInterval(update, 60000);
-    return () => clearInterval(id);
-  }, [deadlineAt, status]);
-
-  if (!label) return null;
-  const urgent = label !== 'Expired' && new Date(deadlineAt) - new Date() < 12 * 3600 * 1000;
+  if (!deadlineAt || !['assigned', 'accepted'].includes(status)) return null;
+  const deadline = new Date(deadlineAt);
+  if (Number.isNaN(deadline.getTime())) return null;
+  const ms = deadline.getTime() - Date.now();
+  const passed = ms <= 0;
+  const timeStr = deadline.toLocaleString(undefined, {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+  const label = passed ? 'Deadline passed' : `Due ${timeStr}`;
   return (
-    <span className={`reviewer-deadline${urgent ? ' urgent' : ''}`}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
+    <span className="reviewer-deadline-text">
       {label}
     </span>
   );
 }
 
 // Decline-reason taxonomy — keep in sync with backend/config.py::DECLINE_REASON_TAXONOMY.
-// The two `excluded` entries do NOT count toward the rolling-window pause threshold.
+// The `excluded` entry does NOT count toward the rolling-window pause threshold.
 const DECLINE_REASON_CATEGORIES = [
   { value: 'conflict_of_interest', label: 'Conflict of Interest', excluded: true },
-  { value: 'out_of_expertise',     label: 'Out of My Expertise',  excluded: true },
   { value: 'workload',             label: 'Workload too high',     excluded: false },
   { value: 'unavailable',          label: 'Unavailable this week', excluded: false },
   { value: 'other',                label: 'Other',                 excluded: false },
@@ -574,7 +561,6 @@ export default function ReviewerDashboard() {
                               <span className="dashboard-doc-name" title={a.filename || `Submission #${a.submission_id}`}>
                                 {a.filename || `Submission #${a.submission_id}`}
                               </span>
-                              <span className="dashboard-doc-size">Submission #{a.submission_id}</span>
                             </div>
                           </div>
                         </td>

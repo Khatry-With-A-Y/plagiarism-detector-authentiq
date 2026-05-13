@@ -392,7 +392,7 @@ def decide_application(target_user_id):
 @reviewers_bp.route('/admin/<int:target_user_id>/revoke', methods=['POST'])
 @require_admin
 def revoke_reviewer(target_user_id):
-    """Block 7 (Stage 7c): admin revokes a reviewer's status.
+    """Admin revokes a reviewer's status.
 
     Effect, all in a single transaction:
       - reviewers.revoked_at = now
@@ -443,18 +443,6 @@ def revoke_reviewer(target_user_id):
     except Exception as e:
         return jsonify({'error': f'Revoke failed: {str(e)}'}), 500
 
-
-# ---------------------------------------------------------------------------
-# Decline-handling accountability layer (Step 4):
-# Admin manual pause / unpause levers. The reviewer's account stays valid
-# (they can still log in and finish in-flight assignments) but they are
-# excluded from `assign_many`'s candidate pool while paused. The lazy
-# auto-unpause sweep in `Reviewer.sweep_paused_reviewers()` only clears
-# `auto:`-prefixed pause reasons; admin manual pauses are sticky until an
-# admin explicitly unpauses.
-#
-# See .junie/plans/decline-handling-implementation.md.
-# ---------------------------------------------------------------------------
 
 @reviewers_bp.route('/admin/behaviour', methods=['GET'])
 @require_admin

@@ -3,7 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import Avatar from '../../components/Avatar';
-import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
+import {
+  calculateRiskLevel,
+  getRiskLabel,
+  RISK_PROFILES,
+  SCORE_INPUT_SCALES,
+} from '../../utils/riskAssessment';
 import './userStatistics.css';
 
 function UserStatistics({ isEmbedded = false }) {
@@ -35,6 +40,11 @@ function UserStatistics({ isEmbedded = false }) {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const statisticsRiskOptions = {
+    inputScale: SCORE_INPUT_SCALES.PERCENT,
+    profile: RISK_PROFILES.SUBMITTER,
   };
 
   // Calculate user statistics
@@ -526,7 +536,7 @@ function UserStatistics({ isEmbedded = false }) {
             <div className="ustats-activity-list">
               {recentActivity.map((submission) => {
                 const similarity = submission.similarity_score || 0;
-                const riskLevel = calculateRiskLevel(similarity);
+                const riskLevel = calculateRiskLevel(similarity, null, statisticsRiskOptions);
                 return (
                   <div key={submission.id} className="ustats-activity-item">
                     <div className="ustats-activity-icon">

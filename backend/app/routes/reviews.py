@@ -1,4 +1,5 @@
 import os
+import json
 from flask import Blueprint, request, jsonify, send_file
 from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification
 from ..utils.auth import require_auth, require_admin, require_reviewer, get_current_user
@@ -65,6 +66,16 @@ def create_request():
         
     try:
         Submission.request_review(submission_id, user['id'], domain_tag)
+
+        # Trigger a fresh background re-analysis so reviewers see the best
+        # possible evidence when they open the assignment.
+        try:
+            from .papers import _submission_executor, process_submission_analysis_safe
+            _submission_executor.submit(process_submission_analysis_safe, submission_id)
+        except Exception:
+            # Re-analysis trigger failure must not break the review request creation.
+            pass
+
         return jsonify({
             'message': 'Review request submitted successfully',
             'submission_id': submission_id,
@@ -79,8 +90,8 @@ def create_request():
 @require_admin
 def get_admin_queue():
     """Get the peer review queue for admin"""
-    # Block 5: lazy-expire overdue assignments before serving the queue so
-    # admins always see fresh attrition state and any auto-backfilled rows.
+    # Lazy-expire overdue assignments before serving the queue so admins
+    # always see fresh attrition state and any auto-backfilled rows.
     try:
         Submission.expire_overdue_assignments()
     except Exception:
@@ -100,23 +111,18 @@ def get_admin_queue():
 
     queue_data = Submission.get_admin_review_queue(status, page, limit)
 
-    # Block 7 (Stage 7b): parse pool_breakdown JSON server-side so the admin
-    # queue UI doesn't have to deal with the raw string.
-    import json as _json
+    # Parse pool_breakdown JSON server-side so the admin queue UI doesn't
+    # have to deal with the raw string.
     for row in queue_data.get('requests', []):
         raw = row.get('pool_breakdown')
         if isinstance(raw, str) and raw:
             try:
-                row['pool_breakdown'] = _json.loads(raw)
+                row['pool_breakdown'] = json.loads(raw)
             except Exception:
                 row['pool_breakdown'] = None
 
     return jsonify(queue_data), 200
 
-
-# ---------------------------------------------------------------------------
-# Block 4 — Assignment, Voting & Double-Blind
-# ---------------------------------------------------------------------------
 
 @reviews_bp.route('/admin/submissions/<int:submission_id>/assign', methods=['POST'])
 @require_admin
@@ -142,24 +148,24 @@ def assign_reviewers(submission_id):
 def list_assignments():
     """Reviewer: list own assignments. Admin: list all (admin sees full data).
 
-    Block 7 (Stage 7a): accepts an optional `?status=` query param with one of
-    `pending` (assigned|accepted), `completed` (voted), or `declined_expired`
+    Accepts an optional `?status=` query param with one of `pending`
+    (assigned|accepted), `completed` (voted), or `declined_expired`
     (declined|expired|cancelled). Unknown values are ignored (no filter
     applied).
 
-    Note: when no filter is supplied (default view), entries cancelled by an
-    admin force-promote/reject are hidden from the reviewer's queue. They are
-    still reachable via `?status=declined_expired` so the reviewer can audit
-    *why* the assignment disappeared.
+    When no filter is supplied (default view), entries cancelled by an admin
+    force-promote/reject are hidden from the reviewer's queue. They are still
+    reachable via `?status=declined_expired` so the reviewer can audit why
+    the assignment disappeared.
     """
     user = get_current_user()
     page = int(request.args.get('page', 1))
     limit = min(int(request.args.get('page_size', 50)), 100)
     status_filter = request.args.get('status')
 
-    # Block 5: lazy-expire overdue assignments before listing, so the reviewer
-    # never sees a stale 'assigned/accepted' row past its deadline. Backfill
-    # is triggered transparently inside the sweep.
+    # Lazy-expire overdue assignments before listing so the reviewer never
+    # sees a stale 'assigned/accepted' row past its deadline. Backfill is
+    # triggered transparently inside the sweep.
     try:
         Submission.expire_overdue_assignments()
     except Exception:
@@ -245,20 +251,19 @@ def get_assignment_detail(submission_id):
     safe['review_requested_at'] = detail['review_requested_at']
 
     # Attach top similarity matches so reviewer can evaluate the submission
-    results = SimilarityResult.get_by_submission(submission_id)
+    # Use the softer query variant so doc-level matches appear even without sentence pairs
+    results = SimilarityResult.get_by_submission_for_review(submission_id)
     top_matches = []
     for r in results[:10]:
         match_details = {}
         if r.get('match_details'):
-            import json as _json
             try:
-                match_details = _json.loads(r['match_details'])
+                match_details = json.loads(r['match_details'])
             except Exception:
                 pass
-        # Stage 1: expose per-sentence evidence (same data the user sees on
-        # Results.jsx) so the reviewer can verify suspect phrases against
-        # the corpus. Keep only the keys the UI consumes (`matches` and
-        # `submission_highlight_ranges`) to keep the payload bounded.
+        # Expose per-sentence evidence so the reviewer can verify suspect
+        # phrases against the corpus. Keep only the keys the UI consumes
+        # (`matches` and `submission_highlight_ranges`) to bound payload size.
         slim_details = {
             'matches': match_details.get('matches', []) or [],
             'submission_highlight_ranges':
@@ -277,6 +282,9 @@ def get_assignment_detail(submission_id):
     submission = Submission.get_by_id(submission_id)
     safe['submission_text'] = submission.get('content_text', '') if submission else ''
     safe['top_matches'] = top_matches
+
+    # Expose eligibility scores that justified sending the submission to review.
+    safe['eligibility'] = Submission.get_eligibility(submission_id)
 
     return jsonify(safe), 200
 
@@ -321,10 +329,6 @@ def submit_vote(submission_id):
     except Exception as e:
         return jsonify({'error': f'Vote submission failed: {str(e)}'}), 500
 
-
-# ---------------------------------------------------------------------------
-# Block 5 — Assignment Lifecycle: Accept / Decline / Expire + Backfill
-# ---------------------------------------------------------------------------
 
 @reviews_bp.route('/assignments/<int:submission_id>/accept', methods=['POST'])
 @require_reviewer
@@ -397,12 +401,10 @@ def decline_assignment(submission_id):
 def get_assignment_file(submission_id):
     """Stream the original uploaded PDF for a reviewer's active assignment.
 
-    Stage 1: auth-gated PDF stream so the reviewer's two-pane page can embed
-    the original document via a Bearer-protected blob URL. Authorization:
-      * admins always allowed,
-      * reviewers allowed iff they have an active assignment for this
-        submission (status in {assigned, accepted, voted}); declined and
-        expired assignments are denied.
+    Auth-gated so the reviewer's two-pane page can embed the document via a
+    Bearer-protected blob URL. Admins are always allowed; reviewers are
+    allowed only when their assignment status is in {assigned, accepted,
+    voted} — declined and expired assignments are denied.
     Returns 403 when not authorized, 404 when the file is missing on disk.
     """
     user = get_current_user()
@@ -434,9 +436,9 @@ def get_assignment_file(submission_id):
 @reviews_bp.route('/submissions/<int:submission_id>/panel', methods=['GET'])
 @require_auth
 def get_submission_panel(submission_id):
-    """Submitter post-decision view (Block 7, Stage 7c).
+    """Submitter post-decision view: pseudonymous panel feedback.
 
-    Returns pseudonymous panel feedback (`Reviewer 1..N` labels) for the
+    Returns `Reviewer 1..N`-labelled feedback for the
     owner of the submission. Voter identity is *never* exposed — the
     `serializers.serialize_assignment_list(.., 'owner')` redactor strips
     `reviewer_id` and `reviewer_snapshot`.
@@ -452,9 +454,8 @@ def get_submission_panel(submission_id):
     if submission['user_id'] != user['id'] and user['role'] != 'admin':
         return jsonify({'error': 'Access denied'}), 403
 
-    import json as _json
     try:
-        votes = _json.loads(submission.get('review_votes') or '[]')
+        votes = json.loads(submission.get('review_votes') or '[]')
     except Exception:
         votes = []
 
@@ -484,7 +485,7 @@ def get_submission_panel(submission_id):
 @require_admin
 def get_admin_submission_detail(submission_id):
     """Admin: get full review detail for a submission including all reviewer votes."""
-    # Block 5: lazy-expire overdue assignments before reading detail.
+    # Lazy-expire overdue assignments before reading detail.
     try:
         Submission.expire_overdue_assignments()
     except Exception:
@@ -494,10 +495,9 @@ def get_admin_submission_detail(submission_id):
     if not submission:
         return jsonify({'error': 'Submission not found'}), 404
 
-    import json as _json
     votes_raw = submission.get('review_votes') or '[]'
     try:
-        votes = _json.loads(votes_raw)
+        votes = json.loads(votes_raw)
     except Exception:
         votes = []
 
@@ -510,7 +510,7 @@ def get_admin_submission_detail(submission_id):
         match_details = {}
         if r.get('match_details'):
             try:
-                match_details = _json.loads(r['match_details'])
+                match_details = json.loads(r['match_details'])
             except Exception:
                 pass
         top_matches.append({
@@ -521,12 +521,12 @@ def get_admin_submission_detail(submission_id):
             'highest_match':    match_details.get('highest_match_score', 0),
         })
 
-    # Block 7: surface the pool_breakdown so the admin queue can explain
-    # *why* a submission flipped to insufficient_pool.
+    # Surface pool_breakdown so the admin queue can explain why a submission
+    # flipped to insufficient_pool.
     pool_breakdown = None
     if submission.get('pool_breakdown'):
         try:
-            pool_breakdown = _json.loads(submission['pool_breakdown'])
+            pool_breakdown = json.loads(submission['pool_breakdown'])
         except Exception:
             pool_breakdown = None
 
@@ -612,7 +612,7 @@ def admin_decide_submission(submission_id):
 @require_reviewer
 def get_assignments_summary():
     """Reviewer: summary counts for navbar badge."""
-    # Block 5: keep the badge accurate by sweeping overdue rows first.
+    # Sweep overdue rows first to keep the badge counts accurate.
     try:
         Submission.expire_overdue_assignments()
     except Exception:

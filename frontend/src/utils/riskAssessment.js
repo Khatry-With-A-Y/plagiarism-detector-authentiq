@@ -5,11 +5,29 @@
  * to ensure consistency across all components in the plagiarism detector.
  */
 
-// Standardized risk thresholds (percentage scale)
-export const RISK_THRESHOLDS = {
-  LOW: 15,    // < 15% = Low Risk
-  MEDIUM: 40  // 15-39.9% = Medium Risk, >= 40% = High Risk
+export const SCORE_INPUT_SCALES = {
+  RATIO: 'ratio',
+  PERCENT: 'percent'
 };
+
+export const RISK_PROFILES = {
+  SUBMITTER: 'submitter',
+  REVIEW: 'review'
+};
+
+export const RISK_THRESHOLD_PROFILES = {
+  [RISK_PROFILES.SUBMITTER]: {
+    LOW: 15,   // < 15% = Low Risk
+    MEDIUM: 40 // 15-39.9% = Medium Risk, >= 40% = High Risk
+  },
+  [RISK_PROFILES.REVIEW]: {
+    LOW: 8,    // Reviewer profile is intentionally narrower
+    MEDIUM: 20
+  }
+};
+
+// Backward-compatible default thresholds (submitter profile)
+export const RISK_THRESHOLDS = RISK_THRESHOLD_PROFILES[RISK_PROFILES.SUBMITTER];
 
 // Standardized color scheme for risk levels
 export const RISK_COLORS = {
@@ -30,38 +48,104 @@ export const RISK_COLORS = {
   }
 };
 
+const DEFAULT_RISK_OPTIONS = {
+  inputScale: SCORE_INPUT_SCALES.PERCENT,
+  profile: RISK_PROFILES.SUBMITTER,
+  useMaxLogic: false
+};
+
+const toNumberScore = (score) => {
+  const parsed = Number(score);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const resolveRiskOptions = (riskOptionsOrUseMax = {}) => {
+  if (typeof riskOptionsOrUseMax === 'boolean') {
+    return {
+      ...DEFAULT_RISK_OPTIONS,
+      useMaxLogic: riskOptionsOrUseMax
+    };
+  }
+
+  if (!riskOptionsOrUseMax || typeof riskOptionsOrUseMax !== 'object') {
+    return { ...DEFAULT_RISK_OPTIONS };
+  }
+
+  return {
+    ...DEFAULT_RISK_OPTIONS,
+    ...riskOptionsOrUseMax
+  };
+};
+
+const getThresholdsForProfile = (profile) => {
+  return RISK_THRESHOLD_PROFILES[profile] || RISK_THRESHOLD_PROFILES[RISK_PROFILES.SUBMITTER];
+};
+
 /**
- * Normalize similarity score to percentage scale
- * Handles both decimal (0-1) and percentage (0-100) inputs
+ * Normalize score to percentage scale using an explicit input scale.
  *
  * @param {number} score - The similarity score
+ * @param {'ratio'|'percent'} inputScale - Input score scale (explicit)
  * @returns {number} Score normalized to percentage scale (0-100)
  */
-export function normalizeScore(score) {
-  return score <= 1 ? score * 100 : score;
+export function normalizeScore(score, inputScale = SCORE_INPUT_SCALES.PERCENT) {
+  const parsedScore = toNumberScore(score);
+
+  if (inputScale === SCORE_INPUT_SCALES.RATIO) {
+    return parsedScore * 100;
+  }
+
+  return parsedScore;
+}
+
+/**
+ * Resolve the final percentage score used for risk classification.
+ *
+ * @param {number} similarity - Primary similarity score
+ * @param {number|null|undefined} exactMatch - Optional sentence-level score
+ * @param {object|boolean} riskOptionsOrUseMax - Options object or legacy boolean useMaxLogic
+ * @returns {number} Final percentage score used for threshold comparison
+ */
+export function resolveRiskScore(similarity, exactMatch = null, riskOptionsOrUseMax = {}) {
+  const { inputScale, useMaxLogic } = resolveRiskOptions(riskOptionsOrUseMax);
+  const normalizedSimilarity = normalizeScore(similarity, inputScale);
+  const normalizedExactMatch = exactMatch == null
+    ? null
+    : normalizeScore(exactMatch, inputScale);
+
+  if (useMaxLogic && normalizedExactMatch !== null) {
+    return Math.max(normalizedSimilarity, normalizedExactMatch);
+  }
+
+  return normalizedSimilarity;
 }
 
 /**
  * Calculate risk level based on similarity scores
  *
- * @param {number} similarity - Primary similarity score (decimal or percentage)
- * @param {number|null} exactMatch - Optional exact match score (decimal or percentage)
- * @param {boolean} useMaxLogic - Whether to use max of similarity and exactMatch
+ * Preferred call pattern:
+ * `calculateRiskLevel(docScore, sentenceScore, {
+ *   inputScale: SCORE_INPUT_SCALES.RATIO,
+ *   useMaxLogic: true,
+ *   profile: RISK_PROFILES.SUBMITTER
+ * })`
+ *
+ * Legacy compatibility:
+ * - Third argument boolean is still treated as `useMaxLogic`.
+ * - Default scale is percentage when options are omitted.
+ *
+ * @param {number} similarity - Primary similarity score
+ * @param {number|null|undefined} exactMatch - Optional sentence-level score
+ * @param {object|boolean} riskOptionsOrUseMax - `{ inputScale, profile, useMaxLogic }` or legacy boolean
  * @returns {string} Risk level: 'low', 'medium', or 'high'
  */
-export function calculateRiskLevel(similarity, exactMatch = null, useMaxLogic = false) {
-  // Convert scores to percentage scale if needed
-  const normalizedSimilarity = normalizeScore(similarity);
-  const normalizedExactMatch = exactMatch !== null ? normalizeScore(exactMatch) : null;
+export function calculateRiskLevel(similarity, exactMatch = null, riskOptionsOrUseMax = {}) {
+  const { profile } = resolveRiskOptions(riskOptionsOrUseMax);
+  const thresholds = getThresholdsForProfile(profile);
+  const finalScore = resolveRiskScore(similarity, exactMatch, riskOptionsOrUseMax);
 
-  // Determine final score based on logic preference
-  const finalScore = useMaxLogic && normalizedExactMatch !== null
-    ? Math.max(normalizedSimilarity, normalizedExactMatch)
-    : normalizedSimilarity;
-
-  // Apply standardized thresholds
-  if (finalScore < RISK_THRESHOLDS.LOW) return 'low';
-  if (finalScore < RISK_THRESHOLDS.MEDIUM) return 'medium';
+  if (finalScore < thresholds.LOW) return 'low';
+  if (finalScore < thresholds.MEDIUM) return 'medium';
   return 'high';
 }
 
@@ -115,11 +199,11 @@ export function getRiskChartColor(riskLevel) {
  *
  * @param {number} similarity - Primary similarity score
  * @param {number|null} exactMatch - Optional exact match score
- * @param {boolean} useMaxLogic - Whether to use max logic
+ * @param {object|boolean} riskOptionsOrUseMax - Risk options object or legacy boolean useMaxLogic
  * @returns {object} Object containing riskLevel, label, and colors
  */
-export function assessRisk(similarity, exactMatch = null, useMaxLogic = false) {
-  const riskLevel = calculateRiskLevel(similarity, exactMatch, useMaxLogic);
+export function assessRisk(similarity, exactMatch = null, riskOptionsOrUseMax = {}) {
+  const riskLevel = calculateRiskLevel(similarity, exactMatch, riskOptionsOrUseMax);
   return {
     level: riskLevel,
     label: getRiskLabel(riskLevel),

@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { calculateRiskLevel, getRiskTextColor } from '../utils/riskAssessment';
+import {
+  calculateRiskLevel,
+  getRiskTextColor,
+  RISK_PROFILES,
+  SCORE_INPUT_SCALES,
+} from '../utils/riskAssessment';
 
 function ResultCard({ result, rank }) {
   const [expanded, setExpanded] = useState(false);
@@ -7,10 +12,14 @@ function ResultCard({ result, rank }) {
   const matchDetails = result.match_details || {};
   const highestMatchScore = matchDetails.highest_match_score || 0;
   const highestMatchPercent = (highestMatchScore * 100).toFixed(1);
+  const submitterRiskOptions = {
+    inputScale: SCORE_INPUT_SCALES.RATIO,
+    profile: RISK_PROFILES.SUBMITTER,
+  };
 
   // Use standardized risk assessment
-  const similarityRisk = calculateRiskLevel(result.similarity_score);
-  const highestMatchRisk = calculateRiskLevel(highestMatchScore);
+  const similarityRisk = calculateRiskLevel(result.similarity_score, null, submitterRiskOptions);
+  const highestMatchRisk = calculateRiskLevel(highestMatchScore, null, submitterRiskOptions);
 
   const getSimilarityColor = () => getRiskTextColor(similarityRisk);
   const getHighestMatchColor = () => getRiskTextColor(highestMatchRisk);

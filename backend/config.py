@@ -30,8 +30,7 @@ DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
 CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:5173']  # React dev servers
 
 # ---------------------------------------------------------------------------
-# Peer-review / Reviewer-role configuration (Block 1: schema + constants)
-# See .junie/plans/add-reviewer-role-and-peer-review.md
+# Peer-review / Reviewer-role configuration
 # ---------------------------------------------------------------------------
 
 # Institutional-email allowlist. Matching is case-insensitive and uses a
@@ -80,7 +79,7 @@ FAIL_COMMENT_MIN_LEN = 20
 COMMENT_MAX_LEN = 1000
 BIO_MAX_LEN = 2000
 
-# Decline-reason length cap (Block 5).
+# Decline-reason length cap.
 DECLINE_REASON_MAX_LEN = 500
 
 # ---------------------------------------------------------------------------

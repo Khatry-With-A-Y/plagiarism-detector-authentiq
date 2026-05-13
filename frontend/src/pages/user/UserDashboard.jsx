@@ -10,10 +10,24 @@ import ReviewBadge from '../../components/ReviewBadge';
 import Avatar from '../../components/Avatar';
 import ApplyReviewer from '../reviewer/ApplyReviewer';
 import ReviewerDashboard from '../reviewer/ReviewerDashboard';
-import { calculateRiskLevel, getRiskLabel } from '../../utils/riskAssessment';
+import {
+  calculateRiskLevel,
+  getRiskLabel,
+  RISK_PROFILES,
+  SCORE_INPUT_SCALES,
+} from '../../utils/riskAssessment';
 import '../dashboard.css';
 
 const REVIEWER_WORK_TAB_ID = 'reviewer-work';
+
+export const toDashboardScore = (value) => {
+  const numericValue = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+};
+
+export const formatDashboardPercent = (value, fractionDigits = 0) => {
+  return `${toDashboardScore(value).toFixed(fractionDigits)}%`;
+};
 
 function UserDashboard() {
   const { user, logout, isAdmin } = useAuth();
@@ -343,13 +357,19 @@ function UserDashboard() {
     }
   };
 
+  const dashboardRiskOptions = {
+    inputScale: SCORE_INPUT_SCALES.PERCENT,
+    profile: RISK_PROFILES.SUBMITTER,
+    useMaxLogic: true,
+  };
+
   // Use shared risk utility with max logic to preserve existing behavior
   const getDashboardRiskLevel = (similarity, highestExactMatch = 0) => {
-    return calculateRiskLevel(similarity, highestExactMatch, true);
+    return calculateRiskLevel(similarity, highestExactMatch, dashboardRiskOptions);
   };
 
   const getDashboardRiskLabel = (similarity, highestExactMatch = 0) => {
-    const riskLevel = calculateRiskLevel(similarity, highestExactMatch, true);
+    const riskLevel = calculateRiskLevel(similarity, highestExactMatch, dashboardRiskOptions);
     return getRiskLabel(riskLevel);
   };
 
@@ -953,8 +973,8 @@ function UserDashboard() {
                 </thead>
                 <tbody>
                   {paginatedSubmissions.map((submission) => {
-                    const similarity = submission.similarity_score || 0;
-                    const highestMatch = submission.highest_exact_match || 0;
+                    const similarity = toDashboardScore(submission.similarity_score);
+                    const highestMatch = toDashboardScore(submission.highest_exact_match);
                     const riskLevel = getDashboardRiskLevel(similarity, highestMatch);
                     return (
                       <tr key={submission.id}>
@@ -977,12 +997,12 @@ function UserDashboard() {
                           {submission.status === 'completed' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                               <span className={`dashboard-similarity ${riskLevel}`} style={{ fontSize: '13px' }}>
-                                Overall: {similarity.toFixed(0)}%
+                                Overall: {formatDashboardPercent(similarity)}
                               </span>
-                              {submission.highest_exact_match > 0 && (
-                                <span style={{ fontSize: '12px', color: '#6b7280', whiteSpace: 'nowrap' }}>
-                                  Highest Sentence Match: <span style={{ fontWeight: 600, color: submission.highest_exact_match >= 40 ? '#dc2626' : '#059669' }}>
-                                    {submission.highest_exact_match.toFixed(0)}%
+                              {highestMatch > 0 && (
+                                <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                                  Highest Sentence Match: <span style={{ fontWeight: 600, color: highestMatch >= 40 ? '#dc2626' : '#059669' }}>
+                                    {formatDashboardPercent(highestMatch)}
                                   </span>
                                 </span>
                               )}
@@ -1097,8 +1117,8 @@ function UserDashboard() {
             ) : (
               <div className="dashboard-chart">
                 {topSimilarities.map((submission) => {
-                  const similarity = submission.similarity_score || 0;
-                  const highestMatch = submission.highest_exact_match || 0;
+                  const similarity = toDashboardScore(submission.similarity_score);
+                  const highestMatch = toDashboardScore(submission.highest_exact_match);
                   const riskLevel = getDashboardRiskLevel(similarity, highestMatch);
                   return (
                     <div key={submission.id} className="dashboard-chart-row">
@@ -1112,7 +1132,7 @@ function UserDashboard() {
                             style={{ width: `${Math.min(similarity, 100)}%` }}
                           ></div>
                         </div>
-                        <span className="dashboard-chart-value">{similarity.toFixed(0)}%</span>
+                        <span className="dashboard-chart-value">{formatDashboardPercent(similarity)}</span>
                       </div>
                     </div>
                   );

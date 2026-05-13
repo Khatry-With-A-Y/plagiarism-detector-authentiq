@@ -1,7 +1,12 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { reviewsAPI } from '../../api/reviews';
-import HighlightedText from '../../components/HighlightedText';
+import SimilarityMatchesReport from '../../components/SimilarityMatchesReport';
+import {
+  calculateRiskLevel,
+  RISK_PROFILES,
+  SCORE_INPUT_SCALES,
+} from '../../utils/riskAssessment';
 import '../dashboard.css';
 
 const FAIL_REASON_LABELS = {
@@ -14,97 +19,157 @@ const FAIL_REASON_LABELS = {
 
 const FAIL_REASON_TAXONOMY = Object.keys(FAIL_REASON_LABELS);
 
-// ---------------------------------------------------------------------------
-// Stage 2: in-file subcomponents — ReviewHeader, DocumentPane, MatchesSidebar,
-// ActionPanel — kept inside this file so the page remains a single import.
-// At this stage the document pane and matches sidebar still render the same
-// content as before; richer behaviour (tabs, highlights, sentence pairs,
-// focus filter, scroll-to) is layered on in Stage 3 and Stage 4.
-// ---------------------------------------------------------------------------
+function EligibilitySummaryCard({ eligibility }) {
+  if (!eligibility) return null;
 
-function ReviewHeader({ assignment, submissionId, isReadOnly, onBack }) {
+  const { max_doc_score, max_sentence_score, threshold } = eligibility;
+  
+  const docScorePct = (max_doc_score * 100).toFixed(1);
+  const sentScorePct = (max_sentence_score * 100).toFixed(1);
+  const thresholdPct = (threshold * 100).toFixed(0);
+
   return (
-    <div className="dashboard-header">
-      <div>
-        <button
-          className="dashboard-view-link"
-          style={{ marginBottom: '8px', fontSize: '13px' }}
-          onClick={onBack}
-        >
-          ← Back to Dashboard
+    <div className="review-eligibility-card dashboard-card">
+      <div className="review-eligibility-header">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+        </svg>
+        Eligibility Evidence
+      </div>
+      <div className="review-eligibility-body">
+        <div className="review-eligibility-row">
+          <span className="review-eligibility-label">Max Doc Similarity:</span>
+          <span className="review-eligibility-value">{docScorePct}%</span>
+        </div>
+        <div className="review-eligibility-row">
+          <span className="review-eligibility-label">Max Sentence Similarity:</span>
+          <span className="review-eligibility-value">{sentScorePct}%</span>
+        </div>
+        <div className="review-eligibility-row">
+          <span className="review-eligibility-label" title="Submissions must be below this threshold to enter peer review">
+            Review Threshold:
+          </span>
+          <span className="review-eligibility-value">Under {thresholdPct}%</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LowEvidenceBanner() {
+  return (
+    <div className="review-low-evidence-banner">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <div className="review-low-evidence-content">
+        <strong>Limited automated evidence available.</strong>
+        <p>This submission passed the similarity threshold but no sentence-level matches could be extracted (possibly due to PDF layout issues). Please review the original document carefully using the PDF tab.</p>
+      </div>
+    </div>
+  );
+}
+
+function ReviewHeader({ assignment, submissionId, isReadOnly, onBack, actionButtonLabel, onOpenActions, activeDocTab, onChangeTab, pdfTabAvailable, showDeadlinePill }) {
+  return (
+    <div className="review-page-header">
+      <div className="review-header-title-row">
+        <button className="review-header-breadcrumb" onClick={onBack}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Go back
         </button>
-        <h1 className="dashboard-title">
+        <span className="review-header-divider" aria-hidden="true">|</span>
+        <h1 className="review-header-title">
           {isReadOnly ? 'Submitted Review' : 'Review Assignment'}
         </h1>
-        <p className="dashboard-subtitle">
+        <span className="review-header-divider" aria-hidden="true">|</span>
+        <span className="review-header-meta">
           {assignment?.filename || `Submission #${submissionId}`}
-          <span className="dashboard-risk-badge pending"
-                style={{ marginLeft: '10px', fontSize: '11px' }}>
-            {assignment?.domain_tag || 'CS'}
+        </span>
+        <span className="dashboard-risk-badge pending review-header-domain-badge">
+          {assignment?.domain_tag || 'CS'}
+        </span>
+        {isReadOnly && (
+          <span className="dashboard-risk-badge completed">
+            Read-only
           </span>
-        </p>
+        )}
+        <span className="review-header-divider" aria-hidden="true">|</span>
+        <span className="review-header-toggle-label">Toggle views:</span>
+        <div className="review-header-toggle-group" role="tablist" aria-label="Document view">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeDocTab === 'report'}
+            className={`review-header-toggle-btn${activeDocTab === 'report' ? ' active' : ''}`}
+            onClick={() => onChangeTab('report')}
+          >
+            Report
+          </button>
+          {pdfTabAvailable && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeDocTab === 'pdf'}
+              className={`review-header-toggle-btn${activeDocTab === 'pdf' ? ' active' : ''}`}
+              onClick={() => onChangeTab('pdf')}
+            >
+              Original PDF
+            </button>
+          )}
+        </div>
+        <div className="review-header-right-group">
+          {showDeadlinePill && assignment?.deadline_at && (
+            <DeadlinePill deadlineAt={assignment.deadline_at} />
+          )}
+          <button
+            type="button"
+            className="dashboard-btn-primary review-header-action-btn"
+            onClick={onOpenActions}
+          >
+            {actionButtonLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 function DocumentPane({
-  assignment, highlights,
+  assignment,
+  reportResults,
+  focusedPaperId,
   activeDocTab, onChangeTab,
   pdfBlobUrl, pdfLoading, pdfError,
   pdfTabAvailable,
-  highlightedTextRef,
+  hasLowEvidence,
 }) {
-  // Stage 3: two tabs — Extracted Text (default, highlighted) and Original
-  // PDF (auth-gated stream embedded in an iframe). Switching to the PDF tab
-  // triggers a lazy fetch in the parent, which converts the blob to an
-  // object URL and revokes it on unmount / tab switch.
+  // Two tabs — Report (default) and Original PDF (auth-gated stream embedded
+  // in an iframe). Switching to the PDF tab triggers a lazy fetch in the
+  // parent, which converts the blob to an object URL and revokes it on unmount.
   return (
     <div className="dashboard-card">
-      <div className="review-detail-tabs" role="tablist" aria-label="Document view">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeDocTab === 'text'}
-          className={`review-detail-tab-btn${activeDocTab === 'text' ? ' active' : ''}`}
-          onClick={() => onChangeTab('text')}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" strokeWidth="2"
-               strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-          </svg>
-          Extracted Text
-        </button>
-        {pdfTabAvailable && (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeDocTab === 'pdf'}
-            className={`review-detail-tab-btn${activeDocTab === 'pdf' ? ' active' : ''}`}
-            onClick={() => onChangeTab('pdf')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                 stroke="currentColor" strokeWidth="2"
-                 strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            Original PDF
-          </button>
-        )}
-      </div>
 
-      {activeDocTab === 'text' && (
+      {activeDocTab === 'report' && (
         <div>
+          {hasLowEvidence && <LowEvidenceBanner />}
+          {focusedPaperId != null && (
+            <div className="review-detail-pdf-banner">
+              Showing report details for one selected source. Click <strong>Show all</strong> in the right panel to reset.
+            </div>
+          )}
           {assignment?.submission_text ? (
-            <HighlightedText
-              ref={highlightedTextRef}
-              text={assignment.submission_text}
-              highlights={highlights || []}
+            <SimilarityMatchesReport
+              results={reportResults}
+              submissionText={assignment.submission_text}
+              documentsCompared={
+                focusedPaperId == null
+                  ? assignment?.documents_compared
+                  : reportResults.length
+              }
+              context="review"
             />
           ) : (
             <div className="review-detail-doc-empty">No content available.</div>
@@ -114,9 +179,6 @@ function DocumentPane({
 
       {activeDocTab === 'pdf' && (
         <div>
-          <div className="review-detail-pdf-banner">
-            Match highlights are only available on the <strong>Extracted Text</strong> tab.
-          </div>
           {pdfLoading && (
             <div className="review-detail-pdf-empty">Loading original PDF…</div>
           )}
@@ -125,11 +187,10 @@ function DocumentPane({
               {pdfError}{' '}
               <button
                 type="button"
-                className="dashboard-view-link"
-                style={{ marginLeft: '6px' }}
-                onClick={() => onChangeTab('text')}
+                className="dashboard-view-link review-sidebar-reset-btn"
+                onClick={() => onChangeTab('report')}
               >
-                Back to extracted text
+                Back to report
               </button>
             </div>
           )}
@@ -148,27 +209,28 @@ function DocumentPane({
 
 function MatchesSidebar({
   assignment, focusedPaperId, expandedPaperId,
-  onToggleFocus, onToggleExpand, onScrollToSentence,
+  onToggleFocus, onToggleExpand, onOpenReportForPaper,
 }) {
-  // Stage 4: per-paper cards with score badges + expandable sentence pairs.
+  // Per-paper cards with score badges + expandable sentence pairs.
   // Clicking a card toggles the document highlight focus to that paper;
-  // clicking a sentence pair scrolls the extracted-text viewer to that span.
+  // clicking a sentence pair focuses the report on that source.
   const matches = assignment?.top_matches || [];
+  const reviewRiskOptions = {
+    inputScale: SCORE_INPUT_SCALES.RATIO,
+    profile: RISK_PROFILES.REVIEW,
+    useMaxLogic: true,
+  };
 
   return (
     <div className="dashboard-card">
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-        marginBottom: '12px', gap: '8px',
-      }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', margin: 0 }}>
+      <div className="review-sidebar-header">
+        <h3 className="review-sidebar-title">
           Similarity Matches{matches.length > 0 ? ` (Top ${matches.length})` : ''}
         </h3>
         {focusedPaperId != null && (
           <button
             type="button"
-            className="dashboard-view-link"
-            style={{ fontSize: '11px' }}
+            className="dashboard-view-link review-sidebar-reset-btn"
             onClick={() => onToggleFocus(null)}
           >
             Show all
@@ -177,17 +239,25 @@ function MatchesSidebar({
       </div>
 
       {matches.length === 0 ? (
-        <p style={{ color: '#94a3b8', fontSize: '13px', margin: 0 }}>
+        <p className="review-sidebar-empty">
           No similar passages were found in the corpus.
         </p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="review-sidebar-list">
           {matches.map((m, i) => {
             const focused = focusedPaperId === m.paper_id;
             const expanded = expandedPaperId === m.paper_id;
             const sentencePairs = (m.match_details && m.match_details.matches) || [];
-            const docScoreClass = m.similarity_score >= 0.5 ? 'high' :
-                                  m.similarity_score >= 0.2 ? 'medium' : 'low';
+            const highestSentenceMatch = m.highest_match != null
+              ? m.highest_match
+              : sentencePairs.length > 0
+                ? Math.max(...sentencePairs.map(p => p.similarity || 0))
+                : null;
+            const docScoreClass = calculateRiskLevel(
+                                  m.similarity_score,
+                                  highestSentenceMatch,
+                                  reviewRiskOptions
+                                );
             return (
               <div
                 key={m.paper_id ?? i}
@@ -206,7 +276,7 @@ function MatchesSidebar({
                   }}
                   title={focused ? 'Click to clear focus' : 'Focus highlights on this paper'}
                 >
-                  <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="review-match-info">
                     <div className="review-detail-match-title">
                       {m.title || `Paper #${m.paper_id}`}
                     </div>
@@ -218,29 +288,29 @@ function MatchesSidebar({
                     <span className={`dashboard-risk-badge ${docScoreClass}`}>
                       {(m.similarity_score * 100).toFixed(1)}%
                     </span>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    <span className="review-match-sent-label">
                       Top sent.&nbsp;
-                      <strong style={{ color: '#1e293b' }}>
+                      <strong className="review-match-sent-value">
                         {m.highest_match ? `${(m.highest_match * 100).toFixed(1)}%` : '—'}
                       </strong>
                     </span>
                   </div>
                 </div>
 
-                {sentencePairs.length > 0 && (
+                {sentencePairs.length > 0 ? (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onToggleExpand(m.paper_id); }}
-                    className="dashboard-view-link"
-                    style={{
-                      fontSize: '11.5px', marginTop: '8px',
-                      padding: 0, background: 'none', border: 'none',
-                    }}
+                    className="dashboard-view-link review-match-expand-btn"
                   >
                     {expanded
                       ? `Hide ${sentencePairs.length} sentence pair${sentencePairs.length === 1 ? '' : 's'}`
                       : `Show ${sentencePairs.length} sentence pair${sentencePairs.length === 1 ? '' : 's'}`}
                   </button>
+                ) : (
+                  <div className="review-match-card-score-only">
+                    (doc-level similarity only)
+                  </div>
                 )}
 
                 {expanded && sentencePairs.length > 0 && (
@@ -251,38 +321,24 @@ function MatchesSidebar({
                       const pairPct = typeof pair.similarity === 'number'
                         ? `${(pair.similarity * 100).toFixed(0)}%`
                         : null;
-                      const hasSpan = typeof subSent.start === 'number'
-                                   && typeof subSent.end === 'number'
-                                   && subSent.start < subSent.end;
                       return (
                         <div
                           key={pi}
                           className="review-detail-sentence-pair"
-                          onClick={() => {
-                            if (hasSpan) {
-                              onScrollToSentence({
-                                start: subSent.start, end: subSent.end,
-                              });
-                            }
-                          }}
+                          onClick={() => onOpenReportForPaper(m.paper_id)}
                           role="button"
                           tabIndex={0}
                           onKeyDown={(e) => {
-                            if ((e.key === 'Enter' || e.key === ' ') && hasSpan) {
+                            if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
-                              onScrollToSentence({
-                                start: subSent.start, end: subSent.end,
-                              });
+                              onOpenReportForPaper(m.paper_id);
                             }
                           }}
-                          title={hasSpan ? 'Jump to this sentence in the document' : ''}
+                          title="Open this source in report view"
                         >
                           {pairPct && (
-                            <div style={{
-                              display: 'flex', justifyContent: 'flex-end',
-                              fontSize: '10.5px', color: '#64748b', marginBottom: '4px',
-                            }}>
-                              <span><strong style={{ color: '#1e293b' }}>{pairPct}</strong> match</span>
+                            <div className="review-match-pair-header">
+                              <span><strong className="review-match-sent-value">{pairPct}</strong> match</span>
                             </div>
                           )}
                           <div className="review-detail-sentence-label submission">
@@ -291,7 +347,7 @@ function MatchesSidebar({
                           <div className="review-detail-sentence-text submission">
                             {subSent.text || '\u2014'}
                           </div>
-                          <div className="review-detail-sentence-label corpus" style={{ marginTop: '8px' }}>
+                          <div className="review-detail-sentence-label corpus review-match-pair-label-corpus">
                             Corpus
                           </div>
                           <div className="review-detail-sentence-text corpus">
@@ -312,34 +368,26 @@ function MatchesSidebar({
 }
 
 function DeadlinePill({ deadlineAt }) {
-  // Stage 5: subtle pill rendered at the top of the action panel showing
-  // how much time the reviewer has left to vote. Turns amber when <24h
-  // remain and switches to a neutral "passed" state once the deadline is
-  // behind us (shown for context — the server is the source of truth on
-  // whether the assignment expired).
+  // Subtle pill rendered at the top of the action panel showing how much time
+  // the reviewer has left to vote. Turns amber when <24h remain and switches
+  // to a neutral "passed" state once the deadline is behind us (the server
+  // is the authoritative source on whether the assignment has expired).
   if (!deadlineAt) return null;
   const deadline = new Date(deadlineAt);
   if (Number.isNaN(deadline.getTime())) return null;
   const ms = deadline.getTime() - Date.now();
   const hours = ms / (1000 * 60 * 60);
   const passed = ms <= 0;
-  let label;
-  if (passed) {
-    label = 'Deadline passed';
-  } else if (hours < 1) {
-    const mins = Math.max(1, Math.round(ms / 60000));
-    label = `Vote due in ${mins} min`;
-  } else if (hours < 48) {
-    label = `Vote due in ${Math.round(hours)} h`;
-  } else {
-    label = `Vote due in ${Math.round(hours / 24)} d`;
-  }
+  const timeStr = deadline.toLocaleString(undefined, {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+  const label = passed ? 'Deadline passed' : `Due ${timeStr}`;
   const urgent = !passed && hours < 24;
   return (
     <div
-      className={`review-detail-deadline-pill${urgent ? ' urgent' : ''}`}
+      className={`review-detail-deadline-pill${urgent ? ' urgent' : ''}${passed ? ' passed' : ''}`}
       title={deadline.toLocaleString()}
-      style={passed ? { background: '#f1f5f9', color: '#64748b' } : undefined}
     >
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
            stroke="currentColor" strokeWidth="2"
@@ -353,10 +401,8 @@ function DeadlinePill({ deadlineAt }) {
 }
 
 // Decline-reason taxonomy — keep in sync with backend/config.py::DECLINE_REASON_TAXONOMY.
-// The two `excluded` entries do NOT count toward the rolling-window pause threshold.
 const DECLINE_REASON_CATEGORIES = [
   { value: 'conflict_of_interest', label: 'Conflict of Interest', excluded: true },
-  { value: 'out_of_expertise',     label: 'Out of My Expertise',  excluded: true },
   { value: 'workload',             label: 'Workload too high',     excluded: false },
   { value: 'unavailable',          label: 'Unavailable this week', excluded: false },
   { value: 'other',                label: 'Other (please explain)', excluded: false },
@@ -367,7 +413,7 @@ function ActionPanel(props) {
     assignment, isReadOnly, isAssigned, isInactive, alreadyVoted, showVoting,
     voteSuccess, selectedVote, comment, failReasons,
     showDecline, declineReason, declineReasonCategory,
-    submitting, voteError,
+    submitting, voteError, showVoteValidation,
     lifecycleBusy, lifecycleError,
     setShowDecline, setDeclineReason, setDeclineReasonCategory,
     setSelectedVote, setComment, toggleFailReason,
@@ -377,11 +423,10 @@ function ActionPanel(props) {
 
   const status = assignment?.assignment_status;
 
-  // Stage 5: explicit named branch — assigned / decline-confirm / accepted /
-  // voted / inactive. `alreadyVoted` (which also covers `?readonly=1` and
-  // the Completed tab) takes precedence so a read-only revisit always lands
-  // on the submitted-review summary even if the underlying status would
-  // have rendered another panel.
+  // Explicit named branch — assigned / decline-confirm / accepted / voted /
+  // inactive. `alreadyVoted` (which also covers `?readonly=1` and the
+  // Completed tab) takes precedence so a read-only revisit always lands on
+  // the submitted-review summary even if the underlying status differs.
   let branch;
   if (alreadyVoted) branch = 'voted';
   else if (isInactive && !isReadOnly) branch = 'inactive';
@@ -390,33 +435,19 @@ function ActionPanel(props) {
   else if (showVoting) branch = 'accepted';
   else branch = null;
 
-  // Stage 5: deadline pill is most relevant before the reviewer votes
-  // (assigned / decline-confirm / accepted). Once voted or inactive the
-  // deadline isn't actionable anymore, so we hide it.
-  const showDeadlinePill = branch === 'assigned'
-                        || branch === 'decline-confirm'
-                        || branch === 'accepted';
-
   return (
     <>
-      {showDeadlinePill && assignment?.deadline_at && (
-        <DeadlinePill deadlineAt={assignment.deadline_at} />
-      )}
-
       {/* Branch: inactive — declined or expired */}
       {branch === 'inactive' && (
-        <div className="dashboard-card" style={{
-          borderLeft: '4px solid #94a3b8',
-          background: '#f8fafc',
-        }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b', marginBottom: '8px' }}>
+        <div className="dashboard-card review-action-card-inactive">
+          <h3 className="review-action-title">
             Assignment {status === 'declined'
               ? 'Declined'
               : status === 'expired'
                 ? 'Expired'
                 : 'Closed by Admin'}
           </h3>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+          <p className="review-action-text-muted">
             {status === 'declined'
               ? 'You declined this assignment. A replacement reviewer has been notified.'
               : status === 'expired'
@@ -438,50 +469,29 @@ function ActionPanel(props) {
 
       {/* Branches: assigned + decline-confirm — share the same outer card */}
       {(branch === 'assigned' || branch === 'decline-confirm') && (
-        <div className="dashboard-card" style={{
-          borderLeft: '4px solid #1e40af',
-          background: '#eff6ff',
-        }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b', marginBottom: '8px' }}>
+        <div className="dashboard-card review-action-card-assigned">
+          <h3 className="review-action-title">
             Accept this review assignment
           </h3>
-          <p style={{ fontSize: '13px', color: '#475569', marginBottom: '12px' }}>
+          <p className="review-action-text">
             You have until <strong>{assignment?.deadline_at ? new Date(assignment.deadline_at).toLocaleString() : '—'}</strong> to
             cast your vote. Please accept the assignment to unlock the voting
             panel below, or decline if you cannot review this submission.
           </p>
 
           {branch === 'assigned' ? (
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <div className="review-action-buttons">
               <button
                 onClick={handleAccept}
                 disabled={lifecycleBusy}
-                style={{
-                  padding: '10px 24px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: lifecycleBusy ? '#94a3b8' : '#10b981',
-                  color: '#fff',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                  cursor: lifecycleBusy ? 'not-allowed' : 'pointer',
-                }}
+                className="review-action-btn-accept"
               >
                 {lifecycleBusy ? 'Accepting…' : '✓ Accept Assignment'}
               </button>
               <button
                 onClick={() => setShowDecline(true)}
                 disabled={lifecycleBusy}
-                style={{
-                  padding: '10px 24px',
-                  borderRadius: '8px',
-                  border: '1px solid #e5e7eb',
-                  background: '#fff',
-                  color: '#dc2626',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                  cursor: lifecycleBusy ? 'not-allowed' : 'pointer',
-                }}
+                className="review-action-btn-decline"
               >
                 Decline
               </button>
@@ -489,26 +499,16 @@ function ActionPanel(props) {
           ) : (
             <div>
               {/* Decline-handling accountability layer: required structured
-                  category. `conflict_of_interest` and `out_of_expertise` do
-                  NOT count toward the rolling-window pause threshold. */}
-              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
-                Why are you declining? <span style={{ color: '#dc2626' }}>*</span>
+                  category. `conflict_of_interest` does NOT count toward
+                  the rolling-window pause threshold. */}
+              <label className="review-action-label">
+                Why are you declining? <span>*</span>
               </label>
               <select
                 value={declineReasonCategory || ''}
                 onChange={e => setDeclineReasonCategory(e.target.value || null)}
                 disabled={lifecycleBusy}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid #e5e7eb',
-                  fontSize: '13px',
-                  background: '#fff',
-                  boxSizing: 'border-box',
-                  outline: 'none',
-                  marginBottom: '6px',
-                }}
+                className="auth-input-field"
               >
                 <option value="" disabled>Select a reason…</option>
                 {DECLINE_REASON_CATEGORIES.map(cat => (
@@ -517,13 +517,13 @@ function ActionPanel(props) {
                   </option>
                 ))}
               </select>
-              <p style={{ fontSize: '11px', color: '#64748b', margin: '0 0 12px' }}>
+              <p className="review-action-text-muted">
                 <em>Conflict of Interest</em> and <em>Out of My Expertise</em> are
                 considered legitimate declines and are excluded from the pause
                 threshold.
               </p>
 
-              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
+              <label className="review-action-label">
                 Reason for declining (optional, max 500 characters)
               </label>
               <textarea
@@ -532,53 +532,25 @@ function ActionPanel(props) {
                 maxLength={500}
                 rows={3}
                 placeholder="e.g., Conflict of interest with the topic; will be unavailable this week…"
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid #e5e7eb',
-                  fontSize: '13px',
-                  lineHeight: '1.6',
-                  resize: 'vertical',
-                  boxSizing: 'border-box',
-                  outline: 'none',
-                  marginBottom: '4px',
-                }}
+                disabled={lifecycleBusy}
+                className="review-comment-textarea"
               />
-              <div style={{ textAlign: 'right', fontSize: '11px', color: '#94a3b8', marginBottom: '12px' }}>
+              <div className="review-sidebar-empty review-decline-counter">
                 {declineReason.length}/500
               </div>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <div className="review-action-buttons">
                 <button
                   onClick={handleDecline}
                   disabled={lifecycleBusy || !declineReasonCategory}
                   title={!declineReasonCategory ? 'Please select a reason category before confirming.' : undefined}
-                  style={{
-                    padding: '10px 24px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: (lifecycleBusy || !declineReasonCategory) ? '#94a3b8' : '#dc2626',
-                    color: '#fff',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    cursor: (lifecycleBusy || !declineReasonCategory) ? 'not-allowed' : 'pointer',
-                  }}
+                  className="review-action-btn-accept review-action-btn-confirm-decline"
                 >
                   {lifecycleBusy ? 'Declining…' : 'Confirm Decline'}
                 </button>
                 <button
                   onClick={() => { setShowDecline(false); setDeclineReason(''); setDeclineReasonCategory(null); }}
                   disabled={lifecycleBusy}
-                  style={{
-                    padding: '10px 24px',
-                    borderRadius: '8px',
-                    border: '1px solid #e5e7eb',
-                    background: '#fff',
-                    color: '#374151',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    cursor: lifecycleBusy ? 'not-allowed' : 'pointer',
-                  }}
+                  className="review-action-btn-decline"
                 >
                   Cancel
                 </button>
@@ -587,7 +559,7 @@ function ActionPanel(props) {
           )}
 
           {lifecycleError && (
-            <p style={{ fontSize: '13px', color: '#dc2626', marginTop: '12px' }}>{lifecycleError}</p>
+            <p className="review-action-text review-action-error">{lifecycleError}</p>
           )}
         </div>
       )}
@@ -595,27 +567,27 @@ function ActionPanel(props) {
       {/* Branch: voted — submitted-review summary (also rendered for the
           read-only Completed-tab revisit). */}
       {branch === 'voted' && (
-        <div className="dashboard-card" style={{ borderLeft: '4px solid #10b981' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b', marginBottom: '12px' }}>
+        <div className="dashboard-card review-action-card-voted">
+          <h3 className="review-action-title">
             Your Submitted Review
           </h3>
-          <p style={{ marginBottom: '8px' }}>
+          <p className="review-action-text">
             <strong>Vote:</strong>{' '}
             <span className={`dashboard-risk-badge ${assignment?.vote === 'pass' ? 'low' : 'high'}`}>
               {assignment?.vote?.toUpperCase() || (voteSuccess ? selectedVote?.toUpperCase() : '—')}
             </span>
           </p>
           {assignment?.comment && (
-            <p style={{ marginBottom: '8px', fontSize: '14px', color: '#374151' }}>
+            <p className="review-action-text">
               <strong>Comment:</strong> {assignment.comment}
             </p>
           )}
           {assignment?.fail_reasons?.length > 0 && (
-            <div style={{ marginTop: '8px' }}>
-              <strong style={{ fontSize: '13px' }}>Reasons:</strong>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+            <div className="review-action-text">
+              <strong>Reasons:</strong>
+              <div className="review-action-buttons review-reasons-list">
                 {assignment.fail_reasons.map(r => (
-                  <span key={r} className="dashboard-risk-badge high" style={{ fontSize: '11px' }}>
+                  <span key={r} className="dashboard-risk-badge high review-reason-badge">
                     {FAIL_REASON_LABELS[r] || r}
                   </span>
                 ))}
@@ -623,7 +595,7 @@ function ActionPanel(props) {
             </div>
           )}
           {voteSuccess && (
-            <p style={{ marginTop: '12px', color: '#10b981', fontSize: '13px', fontWeight: 500 }}>
+            <p className="review-action-modal-note review-success-text">
               ✓ Vote submitted successfully. Thank you for your review!
             </p>
           )}
@@ -632,61 +604,37 @@ function ActionPanel(props) {
 
       {/* Branch: accepted — pass/fail vote form (only when not read-only). */}
       {branch === 'accepted' && (
-        <div className="dashboard-card">
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#1e293b', marginBottom: '16px' }}>
-            Cast Your Vote
-          </h3>
+        <div className="dashboard-card review-action-card-accepted">
 
           {/* Pass / Fail buttons */}
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+          <div className="review-vote-buttons">
             <button
               onClick={() => { setSelectedVote('pass'); /* failReasons cleared by parent */ }}
-              style={{
-                padding: '10px 28px',
-                borderRadius: '8px',
-                border: `2px solid ${selectedVote === 'pass' ? '#10b981' : '#e5e7eb'}`,
-                background: selectedVote === 'pass' ? '#f0fdf4' : '#fff',
-                color: selectedVote === 'pass' ? '#065f46' : '#374151',
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontSize: '14px',
-                transition: 'all 0.15s',
-              }}
+              className={`review-vote-btn review-vote-btn--pass${selectedVote === 'pass' ? ' active' : ''}`}
             >
               ✓ Pass
             </button>
             <button
               onClick={() => setSelectedVote('fail')}
-              style={{
-                padding: '10px 28px',
-                borderRadius: '8px',
-                border: `2px solid ${selectedVote === 'fail' ? '#ef4444' : '#e5e7eb'}`,
-                background: selectedVote === 'fail' ? '#fef2f2' : '#fff',
-                color: selectedVote === 'fail' ? '#991b1b' : '#374151',
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontSize: '14px',
-                transition: 'all 0.15s',
-              }}
+              className={`review-vote-btn review-vote-btn--fail${selectedVote === 'fail' ? ' active' : ''}`}
             >
               ✗ Fail
             </button>
           </div>
 
-          {/* Fail reasons checklist — only shown when Fail selected */}
           {selectedVote === 'fail' && (
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '8px' }}>
-                Reason(s) for failing <span style={{ color: '#ef4444' }}>*</span>
+            <div className="review-fail-reasons-container">
+              <label className="review-action-label">
+                Reason(s) for failing <span>*</span>
               </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="review-fail-reason-grid">
                 {FAIL_REASON_TAXONOMY.map(reason => (
-                  <label key={reason} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#374151' }}>
+                  <label key={reason} className="review-fail-reason-item">
                     <input
                       type="checkbox"
                       checked={failReasons.includes(reason)}
                       onChange={() => toggleFailReason(reason)}
-                      style={{ width: '15px', height: '15px', accentColor: '#1e40af' }}
+                      className="review-decline-radio"
                     />
                     {FAIL_REASON_LABELS[reason]}
                   </label>
@@ -695,10 +643,9 @@ function ActionPanel(props) {
             </div>
           )}
 
-          {/* Comment box */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
-              Comment{selectedVote === 'fail' ? <span style={{ color: '#ef4444' }}> * (min 20 chars)</span> : ' (optional)'}
+          <div className="review-comment-container">
+            <label className="review-action-label">
+              Comment{selectedVote === 'fail' ? <span> * (min 20 chars)</span> : ' (optional)'}
             </label>
             <textarea
               value={comment}
@@ -710,55 +657,34 @@ function ActionPanel(props) {
                   ? 'Explain why this submission fails originality review (required, min 20 characters)…'
                   : 'Optional comments for the admin…'
               }
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: `1px solid ${selectedVote === 'fail' && comment.trim().length < 20 && comment.length > 0 ? '#ef4444' : '#e5e7eb'}`,
-                fontSize: '13px',
-                lineHeight: '1.6',
-                resize: 'vertical',
-                boxSizing: 'border-box',
-                outline: 'none',
-              }}
+              className={`review-comment-textarea${selectedVote === 'fail' && comment.trim().length < 20 && comment.length > 0 ? ' error' : ''}`}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+            <div className="review-sidebar-header review-comment-footer">
               {selectedVote === 'fail' && comment.trim().length < 20 && comment.length > 0 && (
-                <span style={{ fontSize: '11px', color: '#ef4444' }}>
+                <span className="review-match-pair-header review-action-validation-error">
                   {20 - comment.trim().length} more characters required
                 </span>
               )}
-              <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: 'auto' }}>
+              <span className="review-sidebar-empty review-comment-counter">
                 {comment.length}/1000
               </span>
             </div>
           </div>
 
-          {/* Validation hint */}
-          {selectedVote === 'fail' && failReasons.length === 0 && (
-            <p style={{ fontSize: '12px', color: '#ef4444', marginBottom: '12px' }}>
+          {showVoteValidation && selectedVote === 'fail' && failReasons.length === 0 && (
+            <p className="review-sidebar-empty review-action-validation-error">
               Please select at least one reason for failing.
             </p>
           )}
 
           {voteError && (
-            <p style={{ fontSize: '13px', color: '#dc2626', marginBottom: '12px' }}>{voteError}</p>
+            <p className="review-sidebar-empty review-action-error">{voteError}</p>
           )}
 
           <button
             onClick={handleSubmitVote}
             disabled={!canSubmit() || submitting}
-            style={{
-              padding: '10px 32px',
-              borderRadius: '8px',
-              border: 'none',
-              background: canSubmit() ? '#1e40af' : '#e5e7eb',
-              color: canSubmit() ? '#fff' : '#94a3b8',
-              fontWeight: 600,
-              fontSize: '14px',
-              cursor: canSubmit() ? 'pointer' : 'not-allowed',
-              transition: 'all 0.15s',
-            }}
+            className="dashboard-btn-primary review-action-open-btn"
           >
             {submitting ? 'Submitting…' : 'Submit Vote'}
           </button>
@@ -772,8 +698,8 @@ export default function ReviewDetail() {
   const { submissionId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  // Block 7: defense-in-depth — opening from the Completed tab also forces
-  // read-only, in addition to the explicit `?readonly=1` flag. The server's
+  // Defense-in-depth: opening from the Completed tab forces read-only in
+  // addition to the explicit `?readonly=1` flag. The server's
   // `MUST_ACCEPT_FIRST` guard remains the authoritative safety net.
   const isReadOnly = searchParams.get('readonly') === '1'
     || searchParams.get('tab') === 'completed';
@@ -786,11 +712,12 @@ export default function ReviewDetail() {
   const [selectedVote, setSelectedVote] = useState(null);
   const [comment, setComment] = useState('');
   const [failReasons, setFailReasons] = useState([]);
+  const [showVoteValidation, setShowVoteValidation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [voteError, setVoteError] = useState(null);
   const [voteSuccess, setVoteSuccess] = useState(false);
 
-  // Block 5: lifecycle (accept / decline) state
+  // Lifecycle (accept / decline) state
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleError, setLifecycleError] = useState(null);
   const [showDecline, setShowDecline] = useState(false);
@@ -799,22 +726,20 @@ export default function ReviewDetail() {
   // Required by the UI; legitimate categories don't count toward the pause threshold.
   const [declineReasonCategory, setDeclineReasonCategory] = useState(null);
 
-  // Stage 3: document-pane tab state. The PDF blob is fetched lazily on the
-  // first time the reviewer activates the PDF tab and revoked on unmount /
-  // tab switch so we don't keep the entire file pinned in memory.
-  const [activeDocTab, setActiveDocTab] = useState('text');
+  // Document-pane tab state. The PDF blob is fetched lazily on the first
+  // time the reviewer opens the PDF tab and revoked on unmount / tab switch
+  // so the file isn't kept pinned in memory.
+  const [activeDocTab, setActiveDocTab] = useState('report');
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState(null);
 
-  // Stage 4: focused paper (filters document highlights to one paper) and
-  // expanded paper (shows the per-paper sentence-pair list inside the
-  // sidebar card). Two separate IDs because the reviewer may want to expand
-  // a card without changing the highlight focus.
+  // Focused paper (filters report view to one paper) and expanded paper
+  // (shows the per-paper sentence-pair list in the sidebar card). Two
+  // separate IDs so the reviewer can expand a card without changing focus.
   const [focusedPaperId, setFocusedPaperId] = useState(null);
   const [expandedPaperId, setExpandedPaperId] = useState(null);
-  const [pendingScrollSpan, setPendingScrollSpan] = useState(null);
-  const highlightedTextRef = useRef(null);
+  const [isActionModalOpen, setIsActionModalOpen] = useState(false);
 
   const reloadAssignment = () =>
     reviewsAPI.getAssignment(Number(submissionId)).then(res => setAssignment(res.data));
@@ -838,7 +763,7 @@ export default function ReviewDetail() {
     try {
       await reviewsAPI.acceptAssignment(Number(submissionId));
       await reloadAssignment();
-      // Block 7: notify the navbar badge so it updates immediately.
+      // Notify the navbar badge so it updates immediately.
       window.dispatchEvent(new Event('reviews:summary-refresh'));
     } catch (err) {
       setLifecycleError(err.response?.data?.error || 'Failed to accept assignment.');
@@ -864,7 +789,7 @@ export default function ReviewDetail() {
         declineReason.trim() || null,
         declineReasonCategory,
       );
-      // Block 7: notify the navbar badge so it updates immediately.
+      // Notify the navbar badge so it updates immediately.
       window.dispatchEvent(new Event('reviews:summary-refresh'));
       // After declining, the reviewer no longer has access; bounce back to the
       // main dashboard with the navbar's "My Reviews" tab pre-selected.
@@ -896,7 +821,7 @@ export default function ReviewDetail() {
   };
 
   const handleSubmitVote = async () => {
-    if (!canSubmit()) return;
+    if (!canSubmit()) { setShowVoteValidation(true); return; }
     setSubmitting(true);
     setVoteError(null);
     try {
@@ -910,7 +835,7 @@ export default function ReviewDetail() {
       // Refresh assignment data
       const res = await reviewsAPI.getAssignment(Number(submissionId));
       setAssignment(res.data);
-      // Block 7: notify the navbar badge so it updates immediately.
+      // Notify the navbar badge so it updates immediately.
       window.dispatchEvent(new Event('reviews:summary-refresh'));
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to submit vote. Please try again.';
@@ -925,62 +850,19 @@ export default function ReviewDetail() {
   // ActionPanel via a wrapper so the subcomponent stays presentational.
   const setSelectedVoteAndReset = (vote) => {
     setSelectedVote(vote);
+    setShowVoteValidation(false);
     if (vote === 'pass') setFailReasons([]);
   };
 
-  // Stage 3 + Stage 4: aggregate every paper's `submission_highlight_ranges`
-  // into a single sorted/merged array driving the extracted-text highlights.
-  // When `focusedPaperId` is set the array is narrowed to that paper's ranges
-  // so the reviewer can isolate which copies came from a specific source.
-  const aggregatedHighlights = useMemo(() => {
-    const matches = assignment?.top_matches || [];
-    const filteredMatches = focusedPaperId == null
-      ? matches
-      : matches.filter(m => m.paper_id === focusedPaperId);
-    const ranges = [];
-    for (const m of filteredMatches) {
-      const list = m?.match_details?.submission_highlight_ranges;
-      if (Array.isArray(list)) {
-        for (const r of list) {
-          if (r && typeof r.start === 'number' && typeof r.end === 'number'
-              && r.start < r.end) {
-            ranges.push({
-              start: r.start,
-              end: r.end,
-              similarity: r.similarity,
-            });
-          }
-        }
-      }
-    }
-    // Merge overlapping ranges so HighlightedText doesn't render duplicate
-    // marks for the same span (multiple papers can match the same sentence).
-    if (ranges.length === 0) return [];
-    ranges.sort((a, b) => a.start - b.start);
-    const merged = [ranges[0]];
-    for (let i = 1; i < ranges.length; i++) {
-      const last = merged[merged.length - 1];
-      const cur = ranges[i];
-      if (cur.start <= last.end) {
-        last.end = Math.max(last.end, cur.end);
-        // Keep the higher similarity so the highlight intensity is honest.
-        if ((cur.similarity || 0) > (last.similarity || 0)) {
-          last.similarity = cur.similarity;
-        }
-      } else {
-        merged.push({ ...cur });
-      }
-    }
-    return merged;
-  }, [assignment, focusedPaperId]);
+  // Keep reviewer report in sync with submitter report renderer. A focused
+  // source from the right sidebar narrows the list to a single match card.
+  const reportResults = focusedPaperId == null
+    ? (assignment?.top_matches || [])
+    : (assignment?.top_matches || []).filter(m => m.paper_id === focusedPaperId);
 
-  // Stage 3: lazy-fetch the original PDF the first time the reviewer opens
-  // the PDF tab. Object URL is revoked on unmount to free memory; the same
-  // happens when the reviewer leaves the tab via `handleChangeDocTab`.
-  // Deps intentionally limited to `activeDocTab` + `submissionId` so the
-  // effect runs once per tab activation. `setPdfLoading` inside the body
-  // would re-fire the effect (and cancel the in-flight promise) if it were
-  // listed as a dep.
+  // Lazy-fetch the original PDF the first time the reviewer opens the PDF
+  // tab. Object URL is revoked on unmount to free memory. Deps limited to
+  // `activeDocTab` + `submissionId` so the effect runs once per activation.
   useEffect(() => {
     if (activeDocTab !== 'pdf') return undefined;
     let cancelled = false;
@@ -1020,8 +902,8 @@ export default function ReviewDetail() {
 
   const handleChangeDocTab = (next) => {
     if (next === activeDocTab) return;
-    if (next === 'text' && pdfBlobUrl) {
-      // Free the blob memory when the reviewer goes back to the text tab.
+    if (next === 'report' && pdfBlobUrl) {
+      // Free the blob memory when the reviewer goes back to the report tab.
       URL.revokeObjectURL(pdfBlobUrl);
       setPdfBlobUrl(null);
       setPdfError(null);
@@ -1029,72 +911,12 @@ export default function ReviewDetail() {
     setActiveDocTab(next);
   };
 
-  // Stage 4: when the reviewer clicks a sentence pair, switch to the text
-  // tab (PDF tab can't show highlights), record the requested span, and let
-  // the effect below scroll to it after the next paint.
-  const handleScrollToSentence = (span) => {
-    if (!span) return;
-    if (activeDocTab !== 'text') handleChangeDocTab('text');
-    // Make sure the span's paper is part of the visible highlights —
-    // otherwise the reviewer may have it filtered out and the mark
-    // wouldn't be in the DOM. Drop the focus filter so the span renders.
-    if (focusedPaperId != null) setFocusedPaperId(null);
-    setPendingScrollSpan({ ...span, ts: Date.now() });
-  };
-
-  // Stage 4: imperative scroll-to logic. Runs when `pendingScrollSpan` or
-  // the highlights change. Auto-expands the truncated viewer if the span
-  // falls past the truncation limit, then scrolls into view + flashes.
-  useEffect(() => {
-    if (!pendingScrollSpan) return undefined;
-    const ht = highlightedTextRef.current;
-    if (!ht) return undefined;
-    const text = assignment?.submission_text || '';
-    const TRUNCATE_AT = 3000;
-    if (pendingScrollSpan.start >= TRUNCATE_AT && text.length > TRUNCATE_AT) {
-      ht.expand();
+  const handleOpenReportForPaper = (paperId) => {
+    if (activeDocTab !== 'report') {
+      handleChangeDocTab('report');
     }
-    // Defer to the next animation frame so the (possibly expanded) DOM
-    // is committed before we query for the <mark>.
-    const raf = requestAnimationFrame(() => {
-      const container = ht.getContainer && ht.getContainer();
-      if (!container) return;
-      // Find a mark whose [start, end] overlaps the requested span.
-      const marks = container.querySelectorAll('mark[data-start]');
-      let target = null;
-      for (const el of marks) {
-        const ms = Number(el.getAttribute('data-start'));
-        const me = Number(el.getAttribute('data-end'));
-        if (Number.isFinite(ms) && Number.isFinite(me)) {
-          if (ms === pendingScrollSpan.start && me === pendingScrollSpan.end) {
-            target = el;
-            break;
-          }
-          // Fall back to first overlap if no exact match found.
-          if (!target && ms < pendingScrollSpan.end && me > pendingScrollSpan.start) {
-            target = el;
-          }
-        }
-      }
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        target.classList.remove('review-detail-flash');
-        // Force reflow so the animation re-triggers on repeated clicks.
-        // eslint-disable-next-line no-unused-expressions
-        target.offsetWidth;
-        target.classList.add('review-detail-flash');
-        window.setTimeout(() => {
-          target.classList.remove('review-detail-flash');
-        }, 1600);
-      } else {
-        // Span isn't in the rendered marks (e.g. data drift) — at least
-        // bring the document into view so the reviewer isn't confused.
-        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      setPendingScrollSpan(null);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [pendingScrollSpan, aggregatedHighlights]);
+    setFocusedPaperId(paperId ?? null);
+  };
 
   const handleToggleFocus = (paperId) => {
     setFocusedPaperId(prev => (prev === paperId ? null : paperId));
@@ -1102,26 +924,6 @@ export default function ReviewDetail() {
   const handleToggleExpand = (paperId) => {
     setExpandedPaperId(prev => (prev === paperId ? null : paperId));
   };
-
-  if (loading) return (
-    <div className="dashboard-container">
-      <div className="dashboard-loading">Loading assignment…</div>
-    </div>
-  );
-
-  if (error) return (
-    <div className="dashboard-container">
-      <div style={{ padding: '32px', textAlign: 'center' }}>
-        <p style={{ color: '#dc2626', marginBottom: '16px' }}>{error}</p>
-        <button
-          className="dashboard-view-link"
-          onClick={() => navigate('/dashboard', { state: { openTab: 'reviewer-work' } })}
-        >
-          ← Back to Dashboard
-        </button>
-      </div>
-    </div>
-  );
 
   const status = assignment?.assignment_status;
   const alreadyVoted = status === 'voted' || voteSuccess;
@@ -1135,10 +937,54 @@ export default function ReviewDetail() {
   const isInactive   = status === 'declined' || status === 'expired' || status === 'cancelled';
   // Voting UI is only available once the reviewer has explicitly accepted.
   const showVoting = !isReadOnly && !alreadyVoted && isAccepted;
-  // Stage 3: declined/expired reviewers should not stream the original file
-  // (the backend also enforces this). Hide the tab on the client to avoid
+  // Declined/expired reviewers should not stream the original file (the
+  // backend also enforces this). Hide the PDF tab client-side to avoid
   // a pointless 403 round-trip.
   const pdfTabAvailable = !isInactive;
+  const showDeadlinePill = (isAssigned && !isReadOnly) || showVoting;
+
+  const actionButtonLabel = isReadOnly || alreadyVoted
+    ? 'View Submitted Review'
+    : isAssigned
+      ? 'Open Accept / Decline'
+      : showVoting
+        ? 'Open Voting Panel'
+        : 'Open Review Panel';
+
+  const topMatches = assignment?.top_matches || [];
+  const hasAnySentencePairs = topMatches.some(m => m.match_details?.matches?.length > 0);
+  const hasLowEvidence = topMatches.length > 0 && !hasAnySentencePairs;
+
+  // Auto-switch to the PDF tab when there are no similarity matches at all.
+  // NOTE: This useEffect must stay before the early returns to satisfy React's
+  // Rules of Hooks — hooks must be called in the same order on every render.
+  useEffect(() => {
+    if (assignment && assignment.top_matches && assignment.top_matches.length === 0) {
+      if (pdfTabAvailable) {
+        setActiveDocTab('pdf');
+      }
+    }
+  }, [assignment, pdfTabAvailable]);
+
+  if (loading) return (
+    <div className="dashboard-container">
+      <div className="dashboard-loading">Loading assignment…</div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="dashboard-container">
+      <div className="review-detail-doc-empty">
+        <p className="review-action-error">{error}</p>
+        <button
+          className="dashboard-view-link"
+          onClick={() => navigate('/dashboard', { state: { openTab: 'reviewer-work' } })}
+        >
+          ← Back to Dashboard
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="dashboard-container">
@@ -1147,66 +993,96 @@ export default function ReviewDetail() {
         submissionId={submissionId}
         isReadOnly={isReadOnly}
         onBack={() => navigate('/dashboard', { state: { openTab: 'reviewer-work' } })}
+        actionButtonLabel={actionButtonLabel}
+        onOpenActions={() => setIsActionModalOpen(true)}
+        activeDocTab={activeDocTab}
+        onChangeTab={handleChangeDocTab}
+        pdfTabAvailable={pdfTabAvailable}
+        showDeadlinePill={showDeadlinePill}
       />
 
-      {/* Stage 2: two-pane workspace — document on the left, sticky sidebar
-          (matches + action panel) on the right. Collapses to a single column
-          below 1024px via dashboard.css. */}
+      {/* Two-pane workspace — document on the left, source-match sidebar on
+          the right. Voting/actions open in a modal to preserve horizontal
+          space for report analysis. */}
       <div className="review-detail-grid">
         <div className="review-detail-main">
           <DocumentPane
             assignment={assignment}
-            highlights={aggregatedHighlights}
+            reportResults={reportResults}
+            focusedPaperId={focusedPaperId}
             activeDocTab={activeDocTab}
             onChangeTab={handleChangeDocTab}
             pdfBlobUrl={pdfBlobUrl}
             pdfLoading={pdfLoading}
             pdfError={pdfError}
             pdfTabAvailable={pdfTabAvailable}
-            highlightedTextRef={highlightedTextRef}
+            hasLowEvidence={hasLowEvidence}
           />
         </div>
 
-        <aside className="review-detail-sidebar">
-          <MatchesSidebar
-            assignment={assignment}
-            focusedPaperId={focusedPaperId}
-            expandedPaperId={expandedPaperId}
-            onToggleFocus={handleToggleFocus}
-            onToggleExpand={handleToggleExpand}
-            onScrollToSentence={handleScrollToSentence}
-          />
-          <ActionPanel
-            assignment={assignment}
-            isReadOnly={isReadOnly}
-            isAssigned={isAssigned}
-            isInactive={isInactive}
-            alreadyVoted={alreadyVoted}
-            showVoting={showVoting}
-            voteSuccess={voteSuccess}
-            selectedVote={selectedVote}
-            comment={comment}
-            failReasons={failReasons}
-            showDecline={showDecline}
-            declineReason={declineReason}
-            declineReasonCategory={declineReasonCategory}
-            submitting={submitting}
-            voteError={voteError}
-            lifecycleBusy={lifecycleBusy}
-            lifecycleError={lifecycleError}
-            setShowDecline={setShowDecline}
-            setDeclineReason={setDeclineReason}
-            setDeclineReasonCategory={setDeclineReasonCategory}
-            setSelectedVote={setSelectedVoteAndReset}
-            setComment={setComment}
-            toggleFailReason={toggleFailReason}
-            handleAccept={handleAccept}
-            handleDecline={handleDecline}
-            handleSubmitVote={handleSubmitVote}
-            canSubmit={canSubmit}
-          />
-        </aside>
       </div>
+
+      {isActionModalOpen && (
+        <div
+          className="review-action-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Review actions"
+          onClick={() => setIsActionModalOpen(false)}
+        >
+          <div
+            className="review-action-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="review-action-modal-header">
+              <h3>{isReadOnly || alreadyVoted ? 'Submitted Review' : 'Cast Your Vote'}</h3>
+              <button
+                type="button"
+                className="review-action-modal-close"
+                onClick={() => setIsActionModalOpen(false)}
+                aria-label="Close review actions"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="review-action-modal-body">
+              <ActionPanel
+                assignment={assignment}
+                isReadOnly={isReadOnly}
+                isAssigned={isAssigned}
+                isInactive={isInactive}
+                alreadyVoted={alreadyVoted}
+                showVoting={showVoting}
+                voteSuccess={voteSuccess}
+                selectedVote={selectedVote}
+                comment={comment}
+                failReasons={failReasons}
+                showDecline={showDecline}
+                declineReason={declineReason}
+                declineReasonCategory={declineReasonCategory}
+                submitting={submitting}
+                voteError={voteError}
+                showVoteValidation={showVoteValidation}
+                lifecycleBusy={lifecycleBusy}
+                lifecycleError={lifecycleError}
+                setShowDecline={setShowDecline}
+                setDeclineReason={setDeclineReason}
+                setDeclineReasonCategory={setDeclineReasonCategory}
+                setSelectedVote={setSelectedVoteAndReset}
+                setComment={setComment}
+                toggleFailReason={toggleFailReason}
+                handleAccept={handleAccept}
+                handleDecline={handleDecline}
+                handleSubmitVote={handleSubmitVote}
+                canSubmit={canSubmit}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

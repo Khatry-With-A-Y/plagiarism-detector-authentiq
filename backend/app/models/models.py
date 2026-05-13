@@ -538,11 +538,10 @@ class Submission:
             candidates = []
             conflict_ids = set()
 
-            # Block 7 (Stage 7b): exclusion-counter breakdown for the
-            # `insufficient_pool` diagnostic. Counts are mutually exclusive in
-            # *evaluation order* (submitter beats already_assigned beats
-            # expertise beats institution) — same priority as the filter
-            # chain, so the totals always sum to <total_active_reviewers>.
+            # Exclusion-counter breakdown for the `insufficient_pool`
+            # diagnostic. Counts are mutually exclusive in evaluation order
+            # (submitter > already_assigned > expertise > institution) so
+            # the totals always sum to <total_active_reviewers>.
             total_active_reviewers      = len(all_reviewers)
             excluded_submitter          = 0
             excluded_already_assigned   = 0
@@ -607,9 +606,8 @@ class Submission:
             total_active_after = existing_active + len(selected)
 
             if total_active_after < MIN_REVIEWERS_PER_REQUEST:
-                # Block 7 (Stage 7b): structured breakdown so the admin queue
-                # can explain *why* the pool was short instead of just
-                # surfacing the bare badge.
+                # Structured breakdown so the admin queue can explain why
+                # the pool was short.
                 breakdown = {
                     'eligible_count':              len(candidates),
                     'excluded_submitter':          excluded_submitter,
@@ -766,7 +764,7 @@ class Submission:
             if entry.get('assignment_status') == 'voted':
                 raise ValueError('Vote already submitted')
 
-            # Block 5: must accept the assignment before voting.
+            # Must accept the assignment before voting.
             if entry.get('assignment_status') != 'accepted':
                 raise ValueError('MUST_ACCEPT_FIRST')
 
@@ -916,9 +914,6 @@ class Submission:
                 }
         return None
 
-    # ------------------------------------------------------------------
-    # Block 5 — Assignment Lifecycle: Accept / Decline / Expire + Backfill
-    # ------------------------------------------------------------------
 
     @staticmethod
     def accept_assignment(submission_id, reviewer_id):
@@ -1595,6 +1590,25 @@ class SimilarityResult:
         conn.close()
         return results
 
+    @staticmethod
+    def get_by_submission_for_review(submission_id):
+        """Softer variant for reviewer detail: returns all rows with
+        similarity_score > 0, regardless of match_details content."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT sr.*, p.title, p.author, p.filename,
+                   strftime('%Y-%m-%dT%H:%M:%SZ', sr.created_at) as created_at
+            FROM similarity_results sr
+            JOIN papers p ON sr.paper_id = p.id
+            WHERE sr.submission_id = ?
+              AND sr.similarity_score > 0
+            ORDER BY sr.similarity_score DESC
+        ''', (submission_id,))
+        results = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return results
+
 class Reviewer:
     # ------------------------------------------------------------------
     # Decline-handling accountability layer
@@ -1919,18 +1933,13 @@ class Reviewer:
     def list_applications(status=None, page=1, limit=50):
         """List reviewer applications for admin.
 
-        Block 7 (Stage 7c): adds a synthetic ``status='revoked'`` filter.
+        Supports a synthetic ``status='revoked'`` filter: ``revoke`` flips
+        ``application_status`` to ``'rejected'`` and stamps ``revoked_at``.
+        Without special handling the plain ``'rejected'`` filter would mix
+        rejected applicants and revoked ex-reviewers, so:
 
-        ``revoke`` flips ``application_status`` from ``'approved'`` to
-        ``'rejected'`` AND stamps ``revoked_at``. Without special handling the
-        plain ``'rejected'`` filter would mix two distinct populations:
-        applicants the admin rejected and ex-reviewers who got revoked. So:
-
-        - ``status='revoked'``  → ``revoked_at IS NOT NULL`` (regardless of
-          ``application_status``, which is always ``'rejected'`` for these
-          rows but kept defensively in case the policy changes).
-        - ``status='rejected'`` → ``application_status='rejected' AND
-          revoked_at IS NULL`` (pure rejections only).
+        - ``status='revoked'``  → ``revoked_at IS NOT NULL``
+        - ``status='rejected'`` → ``application_status='rejected' AND revoked_at IS NULL``
         - ``status='approved' | 'pending'`` → unchanged.
         - ``status=None``       → all rows.
         """

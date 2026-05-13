@@ -34,7 +34,7 @@ def serialize_assignment(entry, viewer_role, assignment_index=None):
             'assignment_status': entry.get('assignment_status'),
             'deadline_at':       entry.get('deadline_at'),
             'assigned_at':       entry.get('assigned_at'),
-            # Block 5: lifecycle timestamps (own data, safe to expose)
+            # Lifecycle timestamps (own data, safe to expose)
             'accepted_at':       entry.get('accepted_at'),
             'declined_at':       entry.get('declined_at'),
             'expired_at':        entry.get('expired_at'),
