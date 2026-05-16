@@ -42,6 +42,8 @@ backend/data/database.db
 !backend/data/raw_papers/cs_papers.json
 backend/benchmark/artifacts/*
 !backend/benchmark/artifacts/.gitkeep
+backend/data/avatars/*
+!backend/data/avatars/.gitkeep
 
 # Vendored NLTK corpora — keep tracked (see backend/data/nltk_data/README.md)
 !backend/data/nltk_data/

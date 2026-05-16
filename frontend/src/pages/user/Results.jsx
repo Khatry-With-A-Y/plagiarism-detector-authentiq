@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import useAuth from '../../hooks/useAuth';
 import useFetchResults from '../../hooks/useFetchResults';
 import reviewsAPI from '../../api/reviews';
+import Avatar from '../../components/Avatar';
 import SimilarityMatchesReport from '../../components/SimilarityMatchesReport';
 import {
   calculateRiskLevel,
@@ -95,11 +96,6 @@ function Results({ id: propId, isEmbedded }) {
     setShowConfirmModal(false);
   };
 
-  const getUserInitials = () => {
-    if (!user?.username) return 'U';
-    return user.username.charAt(0).toUpperCase();
-  };
-
   const submitterRiskOptions = {
     inputScale: SCORE_INPUT_SCALES.RATIO,
     profile: RISK_PROFILES.SUBMITTER,
@@ -171,9 +167,12 @@ function Results({ id: propId, isEmbedded }) {
           </div>
         </div>
         <div className="dashboard-navbar-right">
-          <div className="dashboard-avatar">
-            {getUserInitials()}
-          </div>
+          <Avatar
+            name={user?.username || 'User'}
+            src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
+            className="dashboard-avatar"
+            alt={`${user?.username || 'User'} avatar`}
+          />
         </div>
       </nav>
       )}

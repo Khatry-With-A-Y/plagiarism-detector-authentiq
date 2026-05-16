@@ -705,8 +705,10 @@ function UserDashboard() {
           <div className="dashboard-user-menu" ref={userMenuRef}>
             <Avatar
               name={user?.username || 'User'}
+              src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
               className="dashboard-avatar"
               onClick={() => setShowUserMenu(!showUserMenu)}
+              alt={`${user?.username || 'User'} profile picture`}
             />
             {showUserMenu && (
               <div className="dashboard-dropdown">

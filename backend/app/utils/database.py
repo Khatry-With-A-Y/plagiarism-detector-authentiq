@@ -180,7 +180,15 @@ def init_database():
     columns = [col['name'] for col in cursor.fetchall()]
     if 'status' not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked', 'paused'))")
-    
+
+    # Migration: profile fields — avatar_url and bio
+    if 'avatar_url' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
+        print("Added avatar_url column to users table")
+    if 'bio' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN bio TEXT")
+        print("Added bio column to users table")
+
     # Create papers table (corpus)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS papers (

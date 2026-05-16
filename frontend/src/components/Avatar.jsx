@@ -40,6 +40,7 @@ function getInitials(name) {
 
 export default function Avatar({
   name,
+  src,
   className = '',
   background = '#1e40af',
   color = '#ffffff',
@@ -47,10 +48,9 @@ export default function Avatar({
   alt,
 }) {
   const initials = getInitials(name);
+  const ariaLabel = alt || (name ? `${name} avatar` : 'User avatar');
 
-  const style = {
-    backgroundColor: background,
-    color,
+  const baseStyle = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -65,13 +65,37 @@ export default function Avatar({
     textTransform: 'uppercase',
   };
 
+  if (src) {
+    return (
+      <div
+        className={className}
+        onClick={onClick}
+        style={{ ...baseStyle, backgroundColor: background }}
+        role="img"
+        aria-label={ariaLabel}
+      >
+        <img
+          src={src}
+          alt={ariaLabel}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+          onError={(e) => {
+            // If the image fails to load, hide it and show initials fallback
+            e.currentTarget.style.display = 'none';
+            e.currentTarget.parentElement.setAttribute('data-fallback', 'true');
+            e.currentTarget.parentElement.innerHTML = initials;
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className={className}
       onClick={onClick}
-      style={style}
+      style={{ ...baseStyle, backgroundColor: background, color }}
       role="img"
-      aria-label={alt || (name ? `${name} avatar` : 'User avatar')}
+      aria-label={ariaLabel}
     >
       {initials}
     </div>

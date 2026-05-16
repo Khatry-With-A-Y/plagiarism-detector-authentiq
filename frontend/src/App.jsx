@@ -14,6 +14,7 @@ import ApplyReviewer from './pages/reviewer/ApplyReviewer';
 import VerifyEmail from './pages/reviewer/VerifyEmail';
 import ReviewerDashboard from './pages/reviewer/ReviewerDashboard';
 import ReviewDetail from './pages/reviewer/ReviewDetail';
+import UserProfile from './pages/user/UserProfile';
 import './index.css';
 
 // Protected Route component
@@ -157,6 +158,14 @@ function App() {
               <AdminRoute>
                 <UserManagement />
               </AdminRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <UserProfile />
+              </ProtectedRoute>
             }
           />
           <Route path="/" element={<Landing />} />

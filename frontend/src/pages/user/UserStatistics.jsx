@@ -237,7 +237,8 @@ function UserStatistics({ isEmbedded = false }) {
           </button>
           <div className="ustats-user-menu">
             <Avatar
-              name="User"
+              name={user?.username || 'User'}
+              src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
               className="ustats-avatar"
               onClick={() => setShowUserMenu(!showUserMenu)}
             />

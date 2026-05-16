@@ -72,6 +72,43 @@ class User:
         return users
 
 
+    @staticmethod
+    def update_avatar(user_id, avatar_url):
+        """Set the avatar_url for a user"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET avatar_url = ? WHERE id = ?", (avatar_url, user_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def remove_avatar(user_id):
+        """Clear the avatar_url for a user (revert to initials)"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET avatar_url = NULL WHERE id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def update_password(user_id, new_hash):
+        """Replace the stored password hash for a user"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def update_bio(user_id, bio):
+        """Update the bio/about text for a user"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET bio = ? WHERE id = ?", (bio, user_id))
+        conn.commit()
+        conn.close()
+
+
 class Paper:
     @staticmethod
     def create(title, author, filename, file_path, content_text, uploaded_by):

@@ -1,8 +1,8 @@
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 
 from .. import config
-from ..config import CORS_ORIGINS, UPLOAD_FOLDER, CORPUS_FOLDER
+from ..config import CORS_ORIGINS, UPLOAD_FOLDER, CORPUS_FOLDER, DATA_DIR
 from .utils.database import init_database
 
 # import blueprints
@@ -11,6 +11,8 @@ from .routes.papers import papers_bp
 from .routes.reviewers import reviewers_bp
 from .routes.reviews import reviews_bp
 from .routes.notifications import notifications_bp
+
+AVATARS_DIR = DATA_DIR / 'avatars'
 
 
 def create_app():
@@ -23,14 +25,10 @@ def create_app():
     CORS(app, origins=CORS_ORIGINS)
 
     # ensure required directories exist
-    # data directory may be referenced indirectly via UPLOAD_FOLDER/CORPUS_FOLDER
-    try:
-        from ..config import DATA_DIR
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-    except ImportError:
-        pass
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     CORPUS_FOLDER.mkdir(parents=True, exist_ok=True)
+    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
 
     init_database()
 
@@ -40,5 +38,10 @@ def create_app():
     app.register_blueprint(reviewers_bp)
     app.register_blueprint(reviews_bp, url_prefix='/api/reviews')
     app.register_blueprint(notifications_bp, url_prefix='/api/notifications')
+
+    # serve uploaded avatar images
+    @app.route('/api/avatars/<path:filename>')
+    def serve_avatar(filename):
+        return send_from_directory(str(AVATARS_DIR), filename)
 
     return app
