@@ -2,7 +2,7 @@ import os
 import json
 import secrets
 from flask import Blueprint, request, jsonify, send_file
-from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification, ReviewerInvite
+from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification, ReviewerInvite, Institution
 from ..utils.auth import (
     require_auth, require_admin, require_reviewer, get_current_user,
     generate_token, hash_password
@@ -264,7 +264,33 @@ def list_invitations():
     except (TypeError, ValueError):
         return jsonify({'error': 'submission_id must be an integer'}), 400
     invites = ReviewerInvite.list_by_submission(submission_id)
-    return jsonify({'invites': invites}), 200
+
+    allowlist_domains = []
+    seen_domains = set()
+    for name, domain in Institution.get_allowed() or []:
+        normalized_domain = (domain or '').strip().lower()
+        if not normalized_domain or normalized_domain in seen_domains:
+            continue
+        seen_domains.add(normalized_domain)
+        allowlist_domains.append({
+            'name': name,
+            'domain': normalized_domain,
+        })
+
+    invited_emails = []
+    seen_emails = set()
+    for invite in invites:
+        email = (invite.get('institutional_email') or '').strip().lower()
+        if not email or email in seen_emails:
+            continue
+        seen_emails.add(email)
+        invited_emails.append(email)
+
+    return jsonify({
+        'invites': invites,
+        'allowlist_domains': allowlist_domains,
+        'invited_emails': invited_emails,
+    }), 200
 
 
 @reviews_bp.route('/invitations/consume', methods=['POST'])

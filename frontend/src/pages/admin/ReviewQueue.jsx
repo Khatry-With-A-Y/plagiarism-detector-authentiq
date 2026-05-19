@@ -374,6 +374,9 @@ function ReviewQueue() {
   const [inviteForm, setInviteForm] = useState({ email: '', force: false });
   const [inviteError, setInviteError] = useState(null);
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [inviteContextLoading, setInviteContextLoading] = useState(false);
+  const [inviteContextError, setInviteContextError] = useState(null);
+  const [inviteContext, setInviteContext] = useState({ allowlistDomains: [], invitedEmails: [] });
   const [inviteResultMsg, setInviteResultMsg] = useState({});
   // Block 6: admin Approve/Reject modal state
   const [decisionModal, setDecisionModal] = useState(null);  // { submissionId, mode: 'approve'|'reject', defaultTitle, defaultAuthor }
@@ -445,20 +448,45 @@ function ReviewQueue() {
     }
   };
 
+  const loadInviteContext = async (submissionId) => {
+    setInviteContextLoading(true);
+    setInviteContextError(null);
+    setInviteContext({ allowlistDomains: [], invitedEmails: [] });
+    try {
+      const res = await reviewsAPI.adminListInvites(submissionId);
+      const rawAllowlist = Array.isArray(res.data?.allowlist_domains) ? res.data.allowlist_domains : [];
+      const rawInvitedEmails = Array.isArray(res.data?.invited_emails) ? res.data.invited_emails : [];
+      setInviteContext({
+        allowlistDomains: rawAllowlist,
+        invitedEmails: rawInvitedEmails,
+      });
+    } catch {
+      setInviteContextError('Could not load allowlist or prior invites right now.');
+    } finally {
+      setInviteContextLoading(false);
+    }
+  };
+
   const openInviteModal = (submission) => {
     setInviteForm({ email: '', force: false });
     setInviteError(null);
+    setInviteContextError(null);
+    setInviteContext({ allowlistDomains: [], invitedEmails: [] });
     setInviteModal({
       submissionId: submission.id,
       filename: submission.filename,
       reviewStatus: submission.review_status,
     });
+    loadInviteContext(submission.id);
   };
 
   const closeInviteModal = () => {
     setInviteModal(null);
     setInviteError(null);
     setInviteSubmitting(false);
+    setInviteContextLoading(false);
+    setInviteContextError(null);
+    setInviteContext({ allowlistDomains: [], invitedEmails: [] });
   };
 
   const submitInvite = async () => {
@@ -1046,6 +1074,52 @@ function ReviewQueue() {
                 Submission #{inviteModal.submissionId}
                 {inviteModal.filename && <> — <em>{inviteModal.filename}</em></>}
               </p>
+              <div style={{ marginBottom: '12px' }}>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                  Current allowlist domains
+                </p>
+                {inviteContextLoading ? (
+                  <p style={{ fontSize: '12px', color: '#64748b' }}>Loading allowlist…</p>
+                ) : inviteContext.allowlistDomains.length > 0 ? (
+                  <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#475569' }}>
+                    {inviteContext.allowlistDomains.map((entry, idx) => {
+                      const domain = typeof entry === 'string' ? entry : entry?.domain;
+                      const name = typeof entry === 'string' ? null : entry?.name;
+                      if (!domain) return null;
+                      return (
+                        <li key={`${domain}-${idx}`}>
+                          <code>{domain}</code>
+                          {name ? ` — ${name}` : ''}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p style={{ fontSize: '12px', color: '#64748b' }}>No allowlist domains configured.</p>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <p style={{ fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                  Past invited emails for this review
+                </p>
+                {inviteContextLoading ? (
+                  <p style={{ fontSize: '12px', color: '#64748b' }}>Loading invite history…</p>
+                ) : inviteContext.invitedEmails.length > 0 ? (
+                  <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: '#475569' }}>
+                    {inviteContext.invitedEmails.map((email) => (
+                      <li key={email}><code>{email}</code></li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p style={{ fontSize: '12px', color: '#64748b' }}>No invite has been sent yet for this review.</p>
+                )}
+              </div>
+
+              {inviteContextError && (
+                <p style={{ fontSize: '12px', color: '#b45309', marginBottom: '10px' }}>{inviteContextError}</p>
+              )}
+
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
                 Institutional email
               </label>
