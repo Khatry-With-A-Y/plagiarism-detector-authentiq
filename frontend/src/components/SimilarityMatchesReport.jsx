@@ -7,6 +7,7 @@ import {
   RISK_PROFILES,
   SCORE_INPUT_SCALES,
 } from '../utils/riskAssessment';
+import './SimilarityMatchesReport.css';
 
 const getHighestSentenceMatch = (result) => {
   if (!result.match_details?.matches?.length) return null;
@@ -178,33 +179,25 @@ export default function SimilarityMatchesReport({
                   </tr>
 
                   {isExpanded && hasMatchDetails && (
-                    <tr>
-                      <td colSpan="6" style={{ padding: 0, background: '#f8fafc' }}>
-                        <div style={{ padding: '20px', borderTop: '1px solid #e2e8f0' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                            <div>
-                              <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#1a1a2e', marginBottom: '12px' }}>
+                    <tr className="similarity-details-row">
+                      <td colSpan={6} className="similarity-details-cell">
+                        <div className="similarity-details-body">
+                          <div className="similarity-details-grid">
+                            <section className="similarity-pane similarity-pane--document">
+                              <h4 className="similarity-pane-title">
                                 Your Document (Highlighted Matches)
                               </h4>
                               <HighlightedText
                                 text={submissionText || ''}
                                 highlights={result.match_details.submission_highlight_ranges || []}
                               />
-                            </div>
+                            </section>
 
-                            <div>
-                              <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#1a1a2e', marginBottom: '12px' }}>
+                            <section className="similarity-pane similarity-pane--matches">
+                              <h4 className="similarity-pane-title">
                                 Matched Sentences ({result.match_details.matches.length})
                               </h4>
-                              <div
-                                style={{
-                                  maxHeight: '400px',
-                                  overflowY: 'auto',
-                                  background: '#fff',
-                                  borderRadius: '8px',
-                                  border: '1px solid #e2e8f0',
-                                }}
-                              >
+                              <div className="similarity-matches-list">
                                 {result.match_details.matches.map((match, idx) => {
                                   const classification = getMatchClassification(match.similarity);
                                   return (
@@ -263,7 +256,7 @@ export default function SimilarityMatchesReport({
                                   );
                                 })}
                               </div>
-                            </div>
+                            </section>
                           </div>
                         </div>
                       </td>

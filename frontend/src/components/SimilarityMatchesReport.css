@@ -1,0 +1,100 @@
+/* Keep expanded row readable even though parent table cells use ellipsis styles. */
+.dashboard-table tr.similarity-details-row:hover td.similarity-details-cell {
+  background: #f8fafc;
+}
+
+.dashboard-table td.similarity-details-cell {
+  padding: 0;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  max-height: none;
+  vertical-align: top;
+}
+
+.similarity-details-body {
+  padding: 20px 24px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.similarity-details-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.similarity-pane {
+  min-width: 0;
+}
+
+.similarity-pane--document {
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 18px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.similarity-pane--matches {
+  min-width: 0;
+  padding-left: 6px;
+}
+
+.similarity-pane-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.similarity-matches-list {
+  max-height: 400px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 1280px) {
+  .similarity-details-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .similarity-pane--document {
+    padding-left: 6px;
+    padding-right: 14px;
+  }
+
+  .similarity-pane--matches {
+    padding-left: 4px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .similarity-details-body {
+    padding: 16px;
+  }
+
+  .similarity-details-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .similarity-pane--document {
+    padding-left: 4px;
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .similarity-pane--matches {
+    padding-left: 0;
+    padding-top: 14px;
+    border-top: 1px solid #e2e8f0;
+  }
+}
