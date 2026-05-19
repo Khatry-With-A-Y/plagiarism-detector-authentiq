@@ -12,6 +12,7 @@ import CorpusManagement from './pages/admin/CorpusManagement';
 import UserManagement from './pages/admin/UserManagement';
 import ApplyReviewer from './pages/reviewer/ApplyReviewer';
 import VerifyEmail from './pages/reviewer/VerifyEmail';
+import InviteReviewer from './pages/reviewer/InviteReviewer';
 import ReviewerDashboard from './pages/reviewer/ReviewerDashboard';
 import ReviewDetail from './pages/reviewer/ReviewDetail';
 import UserProfile from './pages/user/UserProfile';
@@ -128,6 +129,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/reviewer/invite" element={<InviteReviewer />} />
           <Route
             path="/reviewer"
             element={

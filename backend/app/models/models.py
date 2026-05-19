@@ -52,7 +52,11 @@ class User:
         email = email.strip() if email else email
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at FROM users WHERE email = ?", (email,))
+        cursor.execute(
+            "SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at "
+            "FROM users WHERE LOWER(email) = LOWER(?)",
+            (email,),
+        )
         user = cursor.fetchone()
         conn.close()
         return dict(user) if user else None
@@ -551,7 +555,7 @@ class Submission:
             # 2. Build candidate pool
             # Get all approved reviewers with matching expertise tag
             cursor.execute('''
-                SELECT r.user_id, r.institution_domain, r.expertise_tags,
+                SELECT r.user_id, r.institution_domain, r.institution_name, r.expertise_tags,
                        u.role, u.username,
                        (SELECT COUNT(*) FROM submissions s2
                         WHERE s2.review_status IN ('assigned','under_review')
@@ -683,6 +687,7 @@ class Submission:
                     'assignment_id':     str(uuid.uuid4()),
                     'reviewer_id':       uid,
                     'assignment_status': 'assigned',
+                    'source':            'auto',
                     'assigned_at':       now_str,
                     'deadline_at':       deadline_str,
                     'completed_at':      None,
@@ -694,6 +699,7 @@ class Submission:
                     'reviewer_snapshot': {
                         'username':           rev.get('username'),
                         'institution_domain': rev.get('institution_domain'),
+                        'institution_name':   rev.get('institution_name'),
                     },
                 }
                 new_entries.append(entry)
@@ -715,6 +721,127 @@ class Submission:
             conn.commit()
             return {'status': 'assigned', 'assigned': len(new_entries)}
 
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def assign_specific_reviewer(submission_id, reviewer_id, source='invite'):
+        """Assign a specific reviewer to a submission without pool selection."""
+        from ...config import REVIEW_DEADLINE_HOURS
+        from datetime import datetime, timezone, timedelta
+        import uuid
+
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT s.id, s.user_id, s.review_votes, s.review_status, s.pool_breakdown,
+                       r.institution_domain as submitter_institution
+                FROM submissions s
+                LEFT JOIN reviewers r ON r.user_id = s.user_id
+                WHERE s.id = ?
+            ''', (submission_id,))
+            sub = cursor.fetchone()
+            if not sub:
+                raise ValueError('Submission not found')
+
+            sub = dict(sub)
+            status = sub.get('review_status')
+            if status is None:
+                raise ValueError('NO_REVIEW_REQUEST')
+            if status in ('approved', 'rejected', 'awaiting_admin'):
+                raise ValueError('REVIEW_CLOSED')
+
+            cursor.execute('''
+                SELECT r.user_id, r.institution_domain, r.institution_name,
+                       r.revoked_at, r.application_status,
+                       u.username, u.role, u.status
+                FROM reviewers r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.user_id = ?
+            ''', (reviewer_id,))
+            rev = cursor.fetchone()
+            if not rev:
+                raise ValueError('REVIEWER_NOT_FOUND')
+            rev = dict(rev)
+            if rev.get('revoked_at'):
+                raise ValueError('REVIEWER_REVOKED')
+            if rev.get('status') in ('blocked', 'paused'):
+                raise ValueError('REVIEWER_INACTIVE')
+            if rev.get('role') not in ('reviewer', 'admin'):
+                raise ValueError('REVIEWER_ROLE_REQUIRED')
+
+            votes = json.loads(sub['review_votes'] or '[]')
+            for entry in votes:
+                if entry.get('reviewer_id') == reviewer_id:
+                    return {
+                        'status': 'already_assigned',
+                        'assignment': entry,
+                        'review_status': status,
+                    }
+
+            now_utc = datetime.now(timezone.utc)
+            deadline_utc = now_utc + timedelta(hours=REVIEW_DEADLINE_HOURS)
+            now_str = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+            deadline_str = deadline_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            submitter_inst = (sub.get('submitter_institution') or '').lower()
+            reviewer_inst = (rev.get('institution_domain') or '').lower()
+            conflict_flag = 1 if (submitter_inst and reviewer_inst and submitter_inst == reviewer_inst) else 0
+
+            entry = {
+                'assignment_id':     str(uuid.uuid4()),
+                'reviewer_id':       reviewer_id,
+                'assignment_status': 'assigned',
+                'source':            source,
+                'assigned_at':       now_str,
+                'deadline_at':       deadline_str,
+                'completed_at':      None,
+                'vote':              None,
+                'comment':           None,
+                'fail_reasons':      None,
+                'decline_reason':    None,
+                'conflict_flag':     conflict_flag,
+                'reviewer_snapshot': {
+                    'username':           rev.get('username'),
+                    'institution_domain': rev.get('institution_domain'),
+                    'institution_name':   rev.get('institution_name'),
+                },
+            }
+            votes.append(entry)
+            pass_count = sum(1 for e in votes if e.get('vote') == 'pass')
+            fail_count = sum(1 for e in votes if e.get('vote') == 'fail')
+
+            new_status = status
+            if status in ('pending', 'insufficient_pool'):
+                new_status = 'assigned'
+
+            cursor.execute('''
+                UPDATE submissions
+                SET review_votes = ?,
+                    review_status = ?,
+                    pass_votes = ?,
+                    fail_votes = ?,
+                    pool_breakdown = ?
+                WHERE id = ?
+            ''', (
+                json.dumps(votes),
+                new_status,
+                pass_count,
+                fail_count,
+                None if new_status != 'insufficient_pool' else sub.get('pool_breakdown'),
+                submission_id,
+            ))
+            conn.commit()
+            return {
+                'status': 'assigned',
+                'assignment': entry,
+                'review_status': new_status,
+            }
         except Exception:
             conn.rollback()
             raise
@@ -1545,7 +1672,7 @@ class Submission:
                     '''
                     UPDATE submissions
                        SET review_status         = ?,
-                           admin_decision        = ?,
+                            admin_decision        = ?,
                            admin_decided_by      = ?,
                            admin_decided_at      = CURRENT_TIMESTAMP,
                            admin_decision_reason = ?,
@@ -1554,6 +1681,15 @@ class Submission:
                     ''',
                     (new_status, new_status, admin_id,
                      (reason or None), json.dumps(votes), submission_id),
+                )
+                cursor.execute(
+                    '''
+                    UPDATE reviewer_invites
+                    SET status = 'revoked',
+                        token_hash = 'revoked:' || lower(hex(randomblob(32)))
+                    WHERE submission_id = ? AND status = 'pending'
+                    ''',
+                    (submission_id,),
                 )
                 conn.commit()
             except Exception:
@@ -2450,6 +2586,135 @@ class Reviewer:
         finally:
             conn.close()
 
+    @staticmethod
+    def ensure_invited_reviewer(user_id, institutional_email, institution_domain=None,
+                                institution_name=None, invited_by=None):
+        """Upsert a reviewer row for an invited expert and grant reviewer role."""
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        institutional_email = (institutional_email or '').strip().lower()
+        institution_domain = (institution_domain or '').strip().lower() or None
+        institution_name = (institution_name or '').strip() or None
+
+        if not institutional_email:
+            raise ValueError('invalid_email')
+
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            user_row = cursor.execute(
+                'SELECT id, role, status FROM users WHERE id = ?',
+                (user_id,),
+            ).fetchone()
+            if not user_row:
+                raise ValueError('User not found')
+            user_row = dict(user_row)
+            if user_row.get('status') in ('blocked', 'paused'):
+                raise ValueError('User inactive')
+
+            rev_row = cursor.execute(
+                '''
+                SELECT user_id, affiliation, expertise_tags, revoked_at
+                FROM reviewers WHERE user_id = ?
+                ''',
+                (user_id,),
+            ).fetchone()
+
+            affiliation = 'Invited reviewer'
+            expertise_tags = json.dumps(['CS'])
+            if rev_row:
+                rev_row = dict(rev_row)
+                if rev_row.get('affiliation'):
+                    affiliation = rev_row['affiliation']
+                if rev_row.get('expertise_tags'):
+                    expertise_tags = rev_row['expertise_tags']
+
+                cursor.execute(
+                    '''
+                    UPDATE reviewers SET
+                        application_status          = 'approved',
+                        reviewed_at                 = ?,
+                        reviewed_by                 = ?,
+                        decision_reason             = ?,
+                        institution_domain          = ?,
+                        institution_name            = ?,
+                        affiliation                 = ?,
+                        institutional_email         = ?,
+                        verified_at                 = ?,
+                        revoked_at                  = NULL,
+                        revoked_by                  = NULL,
+                        revoke_reason               = NULL,
+                        email_verified              = 1,
+                        email_verified_at           = ?,
+                        email_verification_token_hash = NULL,
+                        email_verification_expires_at = NULL
+                    WHERE user_id = ?
+                    ''',
+                    (
+                        now_str,
+                        invited_by,
+                        'invited',
+                        institution_domain,
+                        institution_name,
+                        affiliation,
+                        institutional_email,
+                        now_str,
+                        now_str,
+                        user_id,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    '''
+                    INSERT INTO reviewers (
+                        user_id, application_status, submitted_at,
+                        reviewed_at, reviewed_by, decision_reason,
+                        institution_domain, institution_name, affiliation,
+                        institutional_email, bio, expertise_tags, verified_at,
+                        revoked_at, revoked_by, revoke_reason,
+                        email_verified, email_verified_at,
+                        email_verification_token_hash, email_verification_expires_at
+                    ) VALUES (
+                        ?, 'approved', CURRENT_TIMESTAMP,
+                        ?, ?, ?,
+                        ?, ?, ?,
+                        ?, ?, ?, ?,
+                        NULL, NULL, NULL,
+                        1, ?,
+                        NULL, NULL
+                    )
+                    ''',
+                    (
+                        user_id,
+                        now_str,
+                        invited_by,
+                        'invited',
+                        institution_domain,
+                        institution_name,
+                        affiliation,
+                        institutional_email,
+                        None,
+                        expertise_tags,
+                        now_str,
+                        now_str,
+                    ),
+                )
+
+            if user_row.get('role') != 'admin':
+                cursor.execute(
+                    "UPDATE users SET role = 'reviewer' WHERE id = ?",
+                    (user_id,),
+                )
+
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------
     # Decline-handling accountability layer (Step 4):
     # manual pause / unpause + lazy auto-unpause sweep.
@@ -2690,6 +2955,365 @@ class Reviewer:
             pass
 
         return {'status': 'active', 'user_id': user_id, 'unpaused_by': admin_id}
+
+
+class ReviewerInvite:
+    @staticmethod
+    def _parse_db_timestamp(ts):
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(ts).replace(' ', 'T').rstrip('Z'))
+        except (ValueError, TypeError):
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    @staticmethod
+    def _extract_domain(email):
+        if not email or '@' not in email:
+            return None
+        return email.split('@', 1)[1].strip().lower() or None
+
+    @staticmethod
+    def _resolve_institution(email):
+        from ...config import ALLOWED_INSTITUTION_DOMAINS
+        email_lower = (email or '').lower()
+        for name, domain in ALLOWED_INSTITUTION_DOMAINS:
+            if email_lower.endswith('@' + domain) or email_lower.endswith('.' + domain):
+                return domain, name
+        return None, None
+
+    @staticmethod
+    def _check_cooldown(last_sent_at, now):
+        from ...config import REVIEWER_INVITE_RESEND_COOLDOWN_SECONDS
+        last_sent = ReviewerInvite._parse_db_timestamp(last_sent_at)
+        if last_sent is None:
+            return
+        elapsed = (now - last_sent).total_seconds()
+        if elapsed < REVIEWER_INVITE_RESEND_COOLDOWN_SECONDS:
+            retry_after = int(REVIEWER_INVITE_RESEND_COOLDOWN_SECONDS - elapsed) + 1
+            err = ValueError(
+                f"Please wait {retry_after} seconds before sending another invite."
+            )
+            err.args = (err.args[0], {'retry_after': retry_after, 'reason': 'cooldown'})
+            raise err
+
+    @staticmethod
+    def create(submission_id, institutional_email, invited_by=None, force_allowlist=False):
+        """Create or refresh an invite for a submission + institutional email."""
+        from ..utils.invite_tokens import generate_token, new_expiry
+
+        email = (institutional_email or '').strip().lower()
+        if not email or '@' not in email:
+            raise ValueError('invalid_email')
+
+        domain, name = ReviewerInvite._resolve_institution(email)
+        if not domain and not force_allowlist:
+            raise ValueError('invalid_domain')
+        if not domain:
+            domain = ReviewerInvite._extract_domain(email)
+
+        conn = get_db_connection()
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+
+            row = cursor.execute(
+                'SELECT review_status FROM submissions WHERE id = ?',
+                (submission_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError('submission_not_found')
+            status = row['review_status']
+            if status is None:
+                raise ValueError('no_review_request')
+            if status in ('approved', 'rejected', 'awaiting_admin'):
+                raise ValueError('submission_finalized')
+
+            existing = cursor.execute(
+                '''
+                SELECT id, send_count, last_sent_at
+                FROM reviewer_invites
+                WHERE submission_id = ? AND institutional_email = ?
+                ''',
+                (submission_id, email),
+            ).fetchone()
+
+            if existing:
+                ReviewerInvite._check_cooldown(existing['last_sent_at'], now)
+
+            raw_token, token_hash = generate_token()
+            expires_at = new_expiry()
+            send_count = (existing['send_count'] if existing else 0) + 1
+
+            if existing:
+                cursor.execute(
+                    '''
+                    UPDATE reviewer_invites SET
+                        token_hash       = ?,
+                        status           = 'pending',
+                        expires_at       = ?,
+                        sent_at          = ?,
+                        consumed_at      = NULL,
+                        consumed_by      = NULL,
+                        invited_by       = ?,
+                        send_count       = ?,
+                        last_sent_at     = ?,
+                        last_notified_at = ?,
+                        institution_domain = ?,
+                        institution_name   = ?
+                    WHERE id = ?
+                    ''',
+                    (
+                        token_hash,
+                        expires_at,
+                        now_str,
+                        invited_by,
+                        send_count,
+                        now_str,
+                        now_str,
+                        domain,
+                        name,
+                        existing['id'],
+                    ),
+                )
+                invite_id = existing['id']
+            else:
+                cursor.execute(
+                    '''
+                    INSERT INTO reviewer_invites (
+                        submission_id, institutional_email, token_hash, status,
+                        expires_at, sent_at, invited_by, send_count, last_sent_at,
+                        last_notified_at, institution_domain, institution_name
+                    ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    (
+                        submission_id,
+                        email,
+                        token_hash,
+                        expires_at,
+                        now_str,
+                        invited_by,
+                        send_count,
+                        now_str,
+                        now_str,
+                        domain,
+                        name,
+                    ),
+                )
+                invite_id = cursor.lastrowid
+
+            conn.commit()
+            return {
+                'invite_id': invite_id,
+                'raw_token': raw_token,
+                'institutional_email': email,
+                'institution_domain': domain,
+                'institution_name': name,
+                'expires_at': expires_at,
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def resend(invite_id, invited_by=None):
+        """Re-issue a fresh invite token for an existing pending invite."""
+        from ..utils.invite_tokens import generate_token, new_expiry
+
+        conn = get_db_connection()
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            row = cursor.execute(
+                '''
+                SELECT id, institutional_email, status, send_count, last_sent_at
+                FROM reviewer_invites WHERE id = ?
+                ''',
+                (invite_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError('not_found')
+            if row['status'] != 'pending':
+                raise ValueError('not_pending')
+
+            ReviewerInvite._check_cooldown(row['last_sent_at'], now)
+
+            raw_token, token_hash = generate_token()
+            expires_at = new_expiry()
+            send_count = (row['send_count'] or 0) + 1
+            cursor.execute(
+                '''
+                UPDATE reviewer_invites SET
+                    token_hash       = ?,
+                    expires_at       = ?,
+                    sent_at          = ?,
+                    invited_by       = ?,
+                    send_count       = ?,
+                    last_sent_at     = ?,
+                    last_notified_at = ?
+                WHERE id = ?
+                ''',
+                (
+                    token_hash,
+                    expires_at,
+                    now_str,
+                    invited_by,
+                    send_count,
+                    now_str,
+                    now_str,
+                    invite_id,
+                ),
+            )
+            conn.commit()
+            return {
+                'invite_id': invite_id,
+                'raw_token': raw_token,
+                'institutional_email': row['institutional_email'],
+                'expires_at': expires_at,
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_by_token(raw_token):
+        from ..utils.invite_tokens import hash_token, is_expired
+
+        token_hash = hash_token(raw_token)
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            row = cursor.execute(
+                'SELECT * FROM reviewer_invites WHERE token_hash = ?',
+                (token_hash,),
+            ).fetchone()
+            if not row:
+                raise ValueError('invalid')
+            row = dict(row)
+            if row.get('status') != 'pending':
+                raise ValueError('not_pending')
+            if is_expired(row.get('expires_at')):
+                cursor.execute(
+                    '''
+                    UPDATE reviewer_invites
+                    SET status = 'expired', token_hash = 'expired:' || lower(hex(randomblob(32)))
+                    WHERE id = ?
+                    ''',
+                    (row['id'],),
+                )
+                conn.commit()
+                raise ValueError('expired')
+            return row
+        finally:
+            conn.close()
+
+    @staticmethod
+    def mark_consumed(invite_id, user_id):
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE reviewer_invites
+                SET status = 'consumed',
+                    consumed_at = CURRENT_TIMESTAMP,
+                    consumed_by = ?,
+                    token_hash = 'consumed:' || lower(hex(randomblob(32)))
+                WHERE id = ?
+                ''',
+                (user_id, invite_id),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def revoke(invite_id):
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE reviewer_invites
+                SET status = 'revoked',
+                    token_hash = 'revoked:' || lower(hex(randomblob(32)))
+                WHERE id = ?
+                ''',
+                (invite_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def revoke_pending_by_submission(submission_id):
+        conn = get_db_connection()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE reviewer_invites
+                SET status = 'revoked',
+                    token_hash = 'revoked:' || lower(hex(randomblob(32)))
+                WHERE submission_id = ? AND status = 'pending'
+                ''',
+                (submission_id,),
+            )
+            conn.commit()
+            return cursor.rowcount
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def list_by_submission(submission_id):
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT id, submission_id, institutional_email, status,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) as expires_at,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', sent_at) as sent_at,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', consumed_at) as consumed_at,
+                       invited_by, consumed_by, send_count,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', last_sent_at) as last_sent_at,
+                       strftime('%Y-%m-%dT%H:%M:%SZ', last_notified_at) as last_notified_at,
+                       institution_domain, institution_name
+                FROM reviewer_invites
+                WHERE submission_id = ?
+                ORDER BY created_at DESC
+                ''',
+                (submission_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
 
 class Institution:
     @staticmethod

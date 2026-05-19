@@ -72,6 +72,7 @@ CORPUS_FOLDER = ROOT / "backend" / "data" / "raw_papers"  # NEVER touched
 TABLES_TO_WIPE = [
     "notifications",
     "similarity_results",
+    "reviewer_invites",
     "reviewers",
     "submissions",
     "users",

@@ -54,6 +54,10 @@ REVIEW_ELIGIBILITY_LOWER = 0.05
 REVIEWERS_PER_REQUEST = 5
 MIN_REVIEWERS_PER_REQUEST = 3  # Minimum active reviewers required before a panel can open.
 
+# Reviewer invitation (admin) — magic-link TTL + resend cooldown.
+REVIEWER_INVITE_TTL_HOURS = 7 * 24
+REVIEWER_INVITE_RESEND_COOLDOWN_SECONDS = 60
+
 # Accept/Decline/Vote deadline window for a reviewer.
 REVIEW_DEADLINE_HOURS = 72
 

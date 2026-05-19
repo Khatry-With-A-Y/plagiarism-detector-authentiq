@@ -132,6 +132,11 @@ def _build_link(raw_token):
     return f"{base}/reviewer/verify-email?token={raw_token}"
 
 
+def _build_invite_link(raw_token):
+    base = _env("APP_BASE_URL", APP_BASE_URL_DEFAULT).rstrip("/")
+    return f"{base}/reviewer/invite?token={raw_token}"
+
+
 def send_verification_email(to_email, raw_token):
     """Send (or dev-dump) the institutional-email verification link.
 
@@ -160,6 +165,40 @@ def send_verification_email(to_email, raw_token):
         "24 hours and can be used only once.\n\n"
         f"{link}\n\n"
         "If you did not request this, you can ignore this email."
+    )
+
+    with smtplib.SMTP(BREVO_HOST, BREVO_PORT) as s:
+        s.starttls()
+        s.login(smtp_user, smtp_pass)
+        s.send_message(msg)
+
+    return link
+
+
+def send_reviewer_invite_email(to_email, raw_token, submission_id=None):
+    """Send (or dev-dump) a reviewer invitation magic link."""
+    link = _build_invite_link(raw_token)
+    smtp_user = _login()
+    smtp_pass = _key()
+    smtp_from = _sender()
+
+    if _is_dev_dump() or not smtp_pass:
+        print(f"[MAIL->{to_email}] Reviewer invite: {link}")
+        return link
+
+    msg = EmailMessage()
+    msg["Subject"] = "Authentiq - Reviewer Invitation"
+    msg["From"] = smtp_from
+    msg["To"] = to_email
+    submission_line = f"Submission ID: {submission_id}\n\n" if submission_id else ""
+    msg.set_content(
+        "Hello,\n\n"
+        "You have been invited to review a submission on Authentiq.\n\n"
+        f"{submission_line}"
+        "Click the link below to open the review assignment. "
+        "The link expires after a limited time and can be used only once.\n\n"
+        f"{link}\n\n"
+        "If you were not expecting this invitation, you can ignore this email."
     )
 
     with smtplib.SMTP(BREVO_HOST, BREVO_PORT) as s:

@@ -19,6 +19,16 @@ export const reviewsAPI = {
         api.post(`/reviews/admin/submissions/${submissionId}/assign`),
     adminGetSubmissionDetail: (submissionId) =>
         api.get(`/reviews/admin/submissions/${submissionId}`),
+    adminCreateInvite: (submissionId, institutionalEmail, force = false) =>
+        api.post('/reviews/admin/invitations', {
+            submission_id: submissionId,
+            institutional_email: institutionalEmail,
+            force,
+        }),
+    adminResendInvite: (inviteId) =>
+        api.post(`/reviews/admin/invitations/${inviteId}/resend`),
+    adminListInvites: (submissionId) =>
+        api.get(`/reviews/admin/invitations?submission_id=${submissionId}`),
 
     // --- Block 6: Admin Finalize / Promotion Pipeline ---
     // payload: { decision: 'approve' | 'reject', reason?, title?, author?, force? }
@@ -61,6 +71,13 @@ export const reviewsAPI = {
         }),
     getAssignmentsSummary: () =>
         api.get('/reviews/assignments/summary'),
+
+    // Reviewer invitation magic-link consumption.
+    consumeInvite: (token, username = null) => {
+        const payload = { token };
+        if (username) payload.username = username;
+        return api.post('/reviews/invitations/consume', payload);
+    },
 
     // Block 7: admin variant for the navbar badge
     adminGetRequestsSummary: () =>

@@ -1,8 +1,13 @@
 import os
 import json
+import secrets
 from flask import Blueprint, request, jsonify, send_file
-from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification
-from ..utils.auth import require_auth, require_admin, require_reviewer, get_current_user
+from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification, ReviewerInvite
+from ..utils.auth import (
+    require_auth, require_admin, require_reviewer, get_current_user,
+    generate_token, hash_password
+)
+from ..utils.mailer import send_reviewer_invite_email
 from ..utils.serializers import serialize_assignment, serialize_assignment_list
 from datetime import datetime
 
@@ -141,6 +146,239 @@ def assign_reviewers(submission_id):
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': f'Assignment failed: {str(e)}'}), 500
+
+
+@reviews_bp.route('/admin/invitations', methods=['POST'])
+@require_admin
+def create_invitation():
+    """Admin creates a reviewer invitation and sends the magic link."""
+    admin = get_current_user()
+    data = request.get_json(silent=True) or {}
+    submission_id = data.get('submission_id')
+    institutional_email = (data.get('institutional_email') or '').strip()
+    force = bool(data.get('force'))
+
+    if not submission_id or not institutional_email:
+        return jsonify({'error': 'submission_id and institutional_email are required'}), 400
+    try:
+        submission_id = int(submission_id)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'submission_id must be an integer'}), 400
+
+    try:
+        result = ReviewerInvite.create(
+            submission_id,
+            institutional_email,
+            invited_by=admin['id'],
+            force_allowlist=force,
+        )
+    except ValueError as e:
+        msg = e.args[0] if e.args else ''
+        details = e.args[1] if len(e.args) > 1 and isinstance(e.args[1], dict) else None
+        if details and 'retry_after' in details:
+            return jsonify({
+                'error': msg,
+                'retry_after': details['retry_after'],
+                'reason': details.get('reason'),
+            }), 429
+        if msg == 'invalid_email':
+            return jsonify({'error': 'Missing or invalid institutional_email.'}), 400
+        if msg == 'invalid_domain':
+            return jsonify({'error': 'Email domain must belong to an allowed institution.'}), 400
+        if msg == 'submission_not_found':
+            return jsonify({'error': 'Submission not found'}), 404
+        if msg == 'no_review_request':
+            return jsonify({'error': 'Submission has no review request.'}), 400
+        if msg == 'submission_finalized':
+            return jsonify({'error': 'Submission is already finalized.'}), 409
+        return jsonify({'error': msg or 'Could not create invitation.'}), 400
+
+    try:
+        send_reviewer_invite_email(
+            result['institutional_email'],
+            result['raw_token'],
+            submission_id=submission_id,
+        )
+    except Exception as e:
+        return jsonify({
+            'error': f'Invite created, but the email could not be sent: {e}'
+        }), 500
+
+    return jsonify({
+        'message': 'Invitation sent',
+        'invite_id': result['invite_id'],
+        'institutional_email': result['institutional_email'],
+        'expires_at': result['expires_at'],
+    }), 201
+
+
+@reviews_bp.route('/admin/invitations/<int:invite_id>/resend', methods=['POST'])
+@require_admin
+def resend_invitation(invite_id):
+    """Admin resends a pending invitation (rotates the token)."""
+    admin = get_current_user()
+    try:
+        result = ReviewerInvite.resend(invite_id, invited_by=admin['id'])
+    except ValueError as e:
+        msg = e.args[0] if e.args else ''
+        details = e.args[1] if len(e.args) > 1 and isinstance(e.args[1], dict) else None
+        if details and 'retry_after' in details:
+            return jsonify({
+                'error': msg,
+                'retry_after': details['retry_after'],
+                'reason': details.get('reason'),
+            }), 429
+        if msg == 'not_found':
+            return jsonify({'error': 'Invitation not found.'}), 404
+        if msg == 'not_pending':
+            return jsonify({'error': 'Only pending invites can be resent.'}), 400
+        return jsonify({'error': msg or 'Could not resend invitation.'}), 400
+
+    try:
+        send_reviewer_invite_email(
+            result['institutional_email'],
+            result['raw_token'],
+        )
+    except Exception as e:
+        return jsonify({
+            'error': f'Invite updated, but the email could not be sent: {e}'
+        }), 500
+
+    return jsonify({
+        'message': 'Invitation resent',
+        'invite_id': result['invite_id'],
+        'institutional_email': result['institutional_email'],
+        'expires_at': result['expires_at'],
+    }), 200
+
+
+@reviews_bp.route('/admin/invitations', methods=['GET'])
+@require_admin
+def list_invitations():
+    """Admin lists invitations for a submission."""
+    submission_id = request.args.get('submission_id')
+    if not submission_id:
+        return jsonify({'error': 'submission_id is required'}), 400
+    try:
+        submission_id = int(submission_id)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'submission_id must be an integer'}), 400
+    invites = ReviewerInvite.list_by_submission(submission_id)
+    return jsonify({'invites': invites}), 200
+
+
+@reviews_bp.route('/invitations/consume', methods=['POST'])
+def consume_invitation():
+    """Consume a reviewer invitation magic link."""
+    data = request.get_json(silent=True) or {}
+    token = (data.get('token') or '').strip()
+    username = (data.get('username') or '').strip()
+
+    if not token:
+        return jsonify({'error': 'Missing invitation token.'}), 400
+
+    try:
+        invite = ReviewerInvite.get_by_token(token)
+    except ValueError as e:
+        code = str(e)
+        if code == 'expired':
+            return jsonify({'error': 'This invitation link has expired.'}), 400
+        if code == 'not_pending':
+            return jsonify({'error': 'This invitation link is no longer active.'}), 400
+        return jsonify({'error': 'This invitation link is invalid.'}), 400
+
+    submission = Submission.get_by_id(invite['submission_id'])
+    if not submission:
+        ReviewerInvite.revoke(invite['id'])
+        return jsonify({'error': 'Submission not found.'}), 404
+    if submission.get('review_status') in ('approved', 'rejected'):
+        ReviewerInvite.revoke(invite['id'])
+        return jsonify({'error': 'Submission has already been finalized.'}), 409
+
+    current = get_current_user()
+    if current:
+        if (current.get('email') or '').lower() != invite['institutional_email']:
+            return jsonify({
+                'error': 'This invite belongs to a different account.',
+                'code': 'INVITE_ACCOUNT_MISMATCH',
+                'invited_email': invite['institutional_email'],
+                'current_email': current.get('email'),
+            }), 409
+        if current.get('status') in ('blocked', 'paused'):
+            return jsonify({'error': 'Your account is not eligible to review.'}), 403
+        user = current
+    else:
+        user = User.get_by_email(invite['institutional_email'])
+        if user and user.get('status') in ('blocked', 'paused'):
+            return jsonify({'error': 'Your account is not eligible to review.'}), 403
+        if not user:
+            if not username:
+                return jsonify({
+                    'needs_profile': True,
+                    'invited_email': invite['institutional_email'],
+                    'submission_id': invite['submission_id'],
+                }), 200
+
+            # Robustness: Check if username belongs to the same email
+            existing_by_username = User.get_by_username(username)
+            if existing_by_username:
+                if existing_by_username['email'].strip().lower() == invite['institutional_email'].strip().lower():
+                    user = existing_by_username
+                else:
+                    return jsonify({'error': 'Username already exists'}), 409
+
+            if not user:
+                temp_password = secrets.token_urlsafe(24)
+                password_hash = hash_password(temp_password)
+                try:
+                    user_id = User.create(username, invite['institutional_email'], password_hash, role='reviewer')
+                    user = User.get_by_id(user_id)
+                except ValueError as e:
+                    # Final fallback check by email
+                    existing = User.get_by_email(invite['institutional_email'])
+                    if existing:
+                        user = existing
+                    else:
+                        return jsonify({'error': str(e)}), 400
+
+    try:
+        Reviewer.ensure_invited_reviewer(
+            user['id'],
+            invite['institutional_email'],
+            invite.get('institution_domain'),
+            invite.get('institution_name'),
+            invite.get('invited_by'),
+        )
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    try:
+        assignment = Submission.assign_specific_reviewer(
+            invite['submission_id'],
+            user['id'],
+            source='invite',
+        )
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    ReviewerInvite.mark_consumed(invite['id'], user['id'])
+    refreshed = User.get_by_id(user['id'])
+    token = generate_token(refreshed['id'], refreshed['username'], refreshed['role'])
+
+    return jsonify({
+        'message': 'Invitation consumed',
+        'token': token,
+        'user': {
+            'id': refreshed['id'],
+            'username': refreshed['username'],
+            'email': refreshed['email'],
+            'role': refreshed['role'],
+            'status': refreshed.get('status'),
+        },
+        'submission_id': invite['submission_id'],
+        'review_status': assignment.get('review_status'),
+        'assignment_status': (assignment.get('assignment') or {}).get('assignment_status'),
+    }), 200
 
 
 @reviews_bp.route('/assignments', methods=['GET'])
@@ -530,6 +768,8 @@ def get_admin_submission_detail(submission_id):
         except Exception:
             pool_breakdown = None
 
+    invites = ReviewerInvite.list_by_submission(submission_id)
+
     return jsonify({
         'submission_id':       submission['id'],
         'filename':            submission['filename'],
@@ -545,6 +785,7 @@ def get_admin_submission_detail(submission_id):
         'assignments':         serialized_votes,
         'top_matches':         top_matches,
         'pool_breakdown':      pool_breakdown,
+        'invites':             invites,
     }), 200
 
 

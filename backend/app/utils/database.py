@@ -417,6 +417,38 @@ def init_database():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewers_institution ON reviewers(institution_domain)')
 
     # ----------------------------------------------------------------------
+    # Reviewer invitation (admin -> expert) table.
+    # ----------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reviewer_invites (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            submission_id       INTEGER NOT NULL,
+            institutional_email TEXT NOT NULL,
+            token_hash          TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'pending'
+                                CHECK(status IN ('pending','consumed','expired','revoked')),
+            expires_at          TIMESTAMP,
+            created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            sent_at             TIMESTAMP,
+            consumed_at         TIMESTAMP,
+            invited_by          INTEGER,
+            consumed_by         INTEGER,
+            send_count          INTEGER NOT NULL DEFAULT 0,
+            last_sent_at        TIMESTAMP,
+            last_notified_at    TIMESTAMP,
+            institution_domain  TEXT,
+            institution_name    TEXT,
+            UNIQUE(submission_id, institutional_email),
+            FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+            FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (consumed_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewer_invites_submission ON reviewer_invites(submission_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewer_invites_email ON reviewer_invites(institutional_email)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewer_invites_status ON reviewer_invites(status)')
+
+    # ----------------------------------------------------------------------
     # Migration: institutional-email verification (reviewers role)
     # ----------------------------------------------------------------------
     # Adds 4 nullable columns to `reviewers` so a reviewer applicant must

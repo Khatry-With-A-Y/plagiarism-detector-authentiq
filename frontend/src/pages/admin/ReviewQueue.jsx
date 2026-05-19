@@ -38,6 +38,20 @@ const ASSIGNMENT_STATUS_LABELS = {
   cancelled: 'Closed by admin',
 };
 
+const INVITE_STATUS_LABELS = {
+  pending:  'Pending',
+  consumed: 'Consumed',
+  expired:  'Expired',
+  revoked:  'Revoked',
+};
+
+const INVITE_STATUS_CLASSES = {
+  pending:  'pending',
+  consumed: 'low',
+  expired:  'high',
+  revoked:  'critical',
+};
+
 /**
  * Block 7 (Stage 7b): renders a one-glance hint explaining *why* the
  * reviewer pool was short, given the structured breakdown returned by
@@ -356,6 +370,11 @@ function ReviewQueue() {
   const [assignMsg, setAssignMsg] = useState({});
   const [detailModal, setDetailModal] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [inviteModal, setInviteModal] = useState(null); // { submissionId, filename }
+  const [inviteForm, setInviteForm] = useState({ email: '', force: false });
+  const [inviteError, setInviteError] = useState(null);
+  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [inviteResultMsg, setInviteResultMsg] = useState({});
   // Block 6: admin Approve/Reject modal state
   const [decisionModal, setDecisionModal] = useState(null);  // { submissionId, mode: 'approve'|'reject', defaultTitle, defaultAuthor }
   const [decisionForm, setDecisionForm] = useState({ title: '', author: '', reason: '', force: false });
@@ -423,6 +442,58 @@ function ReviewQueue() {
       setDetailModal({ error: 'Failed to load details.' });
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const openInviteModal = (submission) => {
+    setInviteForm({ email: '', force: false });
+    setInviteError(null);
+    setInviteModal({
+      submissionId: submission.id,
+      filename: submission.filename,
+      reviewStatus: submission.review_status,
+    });
+  };
+
+  const closeInviteModal = () => {
+    setInviteModal(null);
+    setInviteError(null);
+    setInviteSubmitting(false);
+  };
+
+  const submitInvite = async () => {
+    if (!inviteModal) return;
+    if (!inviteForm.email.trim()) {
+      setInviteError('Institutional email is required.');
+      return;
+    }
+    setInviteSubmitting(true);
+    setInviteError(null);
+    try {
+      const res = await reviewsAPI.adminCreateInvite(
+        inviteModal.submissionId,
+        inviteForm.email.trim(),
+        inviteForm.force
+      );
+      setInviteResultMsg(prev => ({
+        ...prev,
+        [inviteModal.submissionId]: {
+          type: 'ok',
+          text: `Invitation sent to ${res.data?.institutional_email || inviteForm.email.trim()}.`,
+        },
+      }));
+      closeInviteModal();
+      if (detailModal && detailModal.submission_id === inviteModal.submissionId) {
+        try {
+          const detail = await reviewsAPI.adminGetSubmissionDetail(inviteModal.submissionId);
+          setDetailModal(detail.data);
+        } catch { /* ignore */ }
+      }
+    } catch (err) {
+      const apiMsg = err.response?.data?.error || 'Failed to send invitation.';
+      setInviteError(apiMsg);
+    } finally {
+      setInviteSubmitting(false);
     }
   };
 
@@ -652,6 +723,14 @@ function ReviewQueue() {
                             </button>
                           </>
                         )}
+                        {!['approved', 'rejected', 'awaiting_admin'].includes(req.review_status) && (
+                          <button
+                            className="dashboard-view-link"
+                            onClick={() => openInviteModal(req)}
+                          >
+                            Invite Reviewer
+                          </button>
+                        )}
                       </div>
                       {assignMsg[req.id] && (
                         <div style={{
@@ -680,6 +759,14 @@ function ReviewQueue() {
                           color: decisionResultMsg[req.id].type === 'ok' ? '#10b981' : '#dc2626'
                         }}>
                           {decisionResultMsg[req.id].text}
+                        </div>
+                      )}
+                      {inviteResultMsg[req.id] && (
+                        <div style={{
+                          fontSize: '11px', marginTop: '4px',
+                          color: inviteResultMsg[req.id].type === 'ok' ? '#10b981' : '#dc2626'
+                        }}>
+                          {inviteResultMsg[req.id].text}
                         </div>
                       )}
                     </td>
@@ -818,6 +905,54 @@ function ReviewQueue() {
                     </div>
                   )}
 
+                  <div className="review-panel-heading" style={{ marginTop: '8px' }}>
+                    <h4>Reviewer Invitations</h4>
+                    {detailModal.invites?.length > 0 && (
+                      <span className="review-panel-heading-hint">
+                        {detailModal.invites.length} invite{detailModal.invites.length === 1 ? '' : 's'} sent
+                      </span>
+                    )}
+                  </div>
+                  {(!detailModal.invites || detailModal.invites.length === 0) ? (
+                    <div className="review-panel-empty">
+                      No reviewer invitations have been sent yet.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '10px', marginBottom: '18px' }}>
+                      {detailModal.invites.map((inv) => (
+                        <div
+                          key={inv.id}
+                          style={{
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '8px',
+                            padding: '10px 12px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '12px',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>
+                              {inv.institutional_email}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>
+                              {inv.sent_at ? `Sent ${formatDate(inv.sent_at)}` : 'Not sent yet'}
+                              {inv.consumed_at && <> · Consumed {formatDate(inv.consumed_at)}</>}
+                            </div>
+                          </div>
+                          <span
+                            className={`dashboard-risk-badge ${INVITE_STATUS_CLASSES[inv.status] || 'pending'}`}
+                            style={{ fontSize: '11px' }}
+                          >
+                            {INVITE_STATUS_LABELS[inv.status] || inv.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="review-panel-heading">
                     <h4>Reviewer Panel</h4>
                     {detailModal.assignments?.length > 0 && (
@@ -893,6 +1028,62 @@ function ReviewQueue() {
                 </>
               )}
               <button className="dashboard-modal-btn dashboard-modal-btn-secondary" onClick={() => setDetailModal(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invite reviewer modal */}
+      {inviteModal && (
+        <div className="dashboard-modal-overlay" onClick={closeInviteModal}>
+          <div className="dashboard-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', width: '95%' }}>
+            <div className="dashboard-modal-header">
+              <h3 className="dashboard-modal-title">Invite Reviewer</h3>
+              <button className="dashboard-modal-close" onClick={closeInviteModal}>✕</button>
+            </div>
+            <div className="dashboard-modal-body">
+              <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px' }}>
+                Submission #{inviteModal.submissionId}
+                {inviteModal.filename && <> — <em>{inviteModal.filename}</em></>}
+              </p>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                Institutional email
+              </label>
+              <input
+                type="email"
+                className="auth-input-field"
+                value={inviteForm.email}
+                onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
+                style={{ width: '100%', marginBottom: '12px', height: '38px', fontSize: '13px' }}
+                placeholder="expert@institution.edu"
+              />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#475569' }}>
+                <input
+                  type="checkbox"
+                  checked={inviteForm.force}
+                  onChange={e => setInviteForm(f => ({ ...f, force: e.target.checked }))}
+                />
+                Allow non-allowlist domain (admin override)
+              </label>
+              {inviteError && (
+                <p style={{ fontSize: '12px', color: '#dc2626', marginTop: '10px' }}>{inviteError}</p>
+              )}
+            </div>
+            <div className="dashboard-modal-footer">
+              <button
+                className="dashboard-modal-btn dashboard-modal-btn-secondary"
+                onClick={closeInviteModal}
+                disabled={inviteSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                className="dashboard-modal-btn dashboard-modal-btn-success"
+                onClick={submitInvite}
+                disabled={inviteSubmitting}
+              >
+                {inviteSubmitting ? 'Sending…' : 'Send Invite'}
+              </button>
             </div>
           </div>
         </div>
