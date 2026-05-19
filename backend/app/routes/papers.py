@@ -29,6 +29,20 @@ _admin_cache = {
 }
 CACHE_TTL = 10 # Lower seconds refreshes cache sooner 
 
+
+def _parse_clamped_int(raw_value, default, min_value, max_value):
+    """Safely parse and clamp an integer query parameter."""
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
 # ========== submission endpoints ===========
 
 @papers_bp.route('/submissions/upload', methods=['POST'])
@@ -149,6 +163,30 @@ def get_submissions():
         })
 
     return jsonify({'submissions': result}), 200
+
+
+@papers_bp.route('/submissions/overlapping-terms', methods=['GET'])
+@require_auth
+def get_overlapping_terms():
+    """Get top overlapping terms for the authenticated user."""
+    user = get_current_user()
+    limit = _parse_clamped_int(request.args.get('limit'), default=5, min_value=1, max_value=50)
+    min_count = _parse_clamped_int(request.args.get('min_count'), default=1, min_value=1, max_value=1000)
+
+    overlapping_terms = SimilarityResult.get_user_overlapping_terms(
+        user['id'],
+        limit=limit,
+        min_count=min_count,
+    )
+
+    return jsonify({
+        'terms': overlapping_terms['terms'],
+        'meta': {
+            'analyzed_submissions': overlapping_terms['analyzed_submissions'],
+            'limit': limit,
+            'min_count': min_count,
+        }
+    }), 200
 
 
 @papers_bp.route('/submissions/<int:submission_id>', methods=['DELETE'])
@@ -349,6 +387,13 @@ def process_submission_analysis(submission_id):
                     print(f"Warning: Failed to compute sentence matches for paper {result['paper_id']}: {e}")
 
         Submission.update_status(submission_id, 'completed')
+
+        # Keep user overlapping-terms cache fresh after new analysis.
+        try:
+            SimilarityResult.invalidate_user_overlapping_terms_cache(submission['user_id'])
+            SimilarityResult.get_user_overlapping_terms(submission['user_id'])
+        except Exception as cache_error:
+            print(f"Warning: Failed to refresh overlapping terms cache for user {submission['user_id']}: {cache_error}")
     except Exception as e:
         Submission.update_status(submission_id, 'pending')
         raise e

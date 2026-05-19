@@ -3,27 +3,68 @@ import { Link, useNavigate } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import Avatar from '../../components/Avatar';
-import {
-  calculateRiskLevel,
-  getRiskLabel,
-  RISK_PROFILES,
-  SCORE_INPUT_SCALES,
-} from '../../utils/riskAssessment';
 import './userStatistics.css';
 
 function UserStatistics({ isEmbedded = false }) {
   const { user, logout, isAdmin } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [submissions, setSubmissions] = useState([]);
+  const [topOverlappingTerms, setTopOverlappingTerms] = useState([]);
+  const [termsLoading, setTermsLoading] = useState(true);
+  const [termsError, setTermsError] = useState('');
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  const fetchOverlappingTerms = async ({ isActiveRef } = {}) => {
+    if (isActiveRef && !isActiveRef.current) {
+      return;
+    }
+
+    if (!isActiveRef || isActiveRef.current) {
+      setTermsLoading(true);
+      setTermsError('');
+    }
+
+    try {
+      const response = await submissionsAPI.getOverlappingTerms({ limit: 5, minCount: 1 });
+      const terms = response?.data?.terms;
+
+      if (isActiveRef && !isActiveRef.current) {
+        return;
+      }
+
+      setTopOverlappingTerms(Array.isArray(terms) ? terms : []);
+    } catch (err) {
+      if (isActiveRef && !isActiveRef.current) {
+        return;
+      }
+
+      console.error('Failed to fetch overlapping terms:', err);
+      setTopOverlappingTerms([]);
+      setTermsError('Unable to load overlapping terms right now.');
+    } finally {
+      if (!isActiveRef || isActiveRef.current) {
+        setTermsLoading(false);
+      }
+    }
+  };
 
   useEffect(() => {
     if (!user) {
       navigate('/login');
       return;
     }
+
+    const isActiveRef = { current: true };
     fetchSubmissions();
+
+    (async () => {
+      await fetchOverlappingTerms({ isActiveRef });
+    })();
+
+    return () => {
+      isActiveRef.current = false;
+    };
   }, [navigate, user]);
 
   const fetchSubmissions = async () => {
@@ -40,11 +81,6 @@ function UserStatistics({ isEmbedded = false }) {
   const handleLogout = () => {
     logout();
     navigate('/login');
-  };
-
-  const statisticsRiskOptions = {
-    inputScale: SCORE_INPUT_SCALES.PERCENT,
-    profile: RISK_PROFILES.SUBMITTER,
   };
 
   // Calculate user statistics
@@ -88,11 +124,6 @@ function UserStatistics({ isEmbedded = false }) {
     return pages;
   };
 
-  // Recent activity (last 5)
-  const recentActivity = [...submissions]
-    .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at))
-    .slice(0, 5);
-
   // Calculate trend (compare this month vs last month average)
   const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
@@ -113,14 +144,7 @@ function UserStatistics({ isEmbedded = false }) {
   const trendChange = lastMonthAvg > 0 ? (thisMonthAvg - lastMonthAvg) : 0;
   const trendImproving = trendChange < 0;
 
-  // Mock top overlapping terms (would come from backend in real implementation)
-  const topOverlappingTerms = [
-    { term: 'methodology', count: 12 },
-    { term: 'analysis', count: 9 },
-    { term: 'research', count: 8 },
-    { term: 'conclusion', count: 6 },
-    { term: 'data processing', count: 5 },
-  ];
+  const highestTermCount = topOverlappingTerms[0]?.count || 1;
 
   // Generate sparkline data for reports trend
   const generateSparklineData = () => {
@@ -164,13 +188,6 @@ function UserStatistics({ isEmbedded = false }) {
   };
 
   const originalityTrendData = generateOriginalityTrend();
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric'
-    });
-  };
 
   if (loading) {
     return (
@@ -474,111 +491,54 @@ function UserStatistics({ isEmbedded = false }) {
             </div>
             <p className="ustats-terms-subtitle">Most frequent terms contributing to similarity scores</p>
 
-            <div className="ustats-terms-list">
-              {topOverlappingTerms.map((item, index) => (
-                <div key={index} className="ustats-term-item">
-                  <div className="ustats-term-rank">{index + 1}</div>
-                  <span className="ustats-term-text">{item.term}</span>
-                  <div className="ustats-term-bar-wrapper">
-                    <div className="ustats-term-bar">
-                      <div
-                        className="ustats-term-bar-fill"
-                        style={{ width: `${(item.count / topOverlappingTerms[0].count) * 100}%` }}
-                      ></div>
+            {termsLoading ? (
+              <div className="ustats-terms-state loading">Loading overlapping terms…</div>
+            ) : termsError ? (
+              <div className="ustats-terms-state error">
+                <p>{termsError}</p>
+                <button
+                  type="button"
+                  className="ustats-terms-refresh-btn"
+                  onClick={() => fetchOverlappingTerms()}
+                >
+                  Refresh
+                </button>
+              </div>
+            ) : topOverlappingTerms.length === 0 ? (
+              <div className="ustats-terms-state empty">
+                <p>No overlapping terms found yet</p>
+                <span>Submit more documents to see common terms across your papers.</span>
+              </div>
+            ) : (
+              <>
+                <div className="ustats-terms-list">
+                  {topOverlappingTerms.map((item, index) => (
+                    <div key={`${item.term}-${index}`} className="ustats-term-item">
+                      <div className="ustats-term-rank">{index + 1}</div>
+                      <span className="ustats-term-text">{item.term}</span>
+                      <div className="ustats-term-bar-wrapper">
+                        <div className="ustats-term-bar">
+                          <div
+                            className="ustats-term-bar-fill"
+                            style={{ width: `${Math.max(4, (item.count / highestTermCount) * 100)}%` }}
+                          ></div>
+                        </div>
+                        <span className="ustats-term-count">{item.count}×</span>
+                      </div>
                     </div>
-                    <span className="ustats-term-count">{item.count}×</span>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <p className="ustats-terms-note">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 16v-4"/>
-                <path d="M12 8h.01"/>
-              </svg>
-              Common academic terms may appear frequently — focus on context
-            </p>
+                <p className="ustats-terms-note">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4"/>
+                    <path d="M12 8h.01"/>
+                  </svg>
+                  Common academic terms may appear frequently — focus on context
+                </p>
+              </>
+            )}
           </div>
-        </section>
-
-        {/* Recent Activity */}
-        <section className="ustats-activity">
-          <div className="ustats-activity-header">
-            <div>
-              <h2>Recent Activity</h2>
-              <p className="ustats-activity-subtitle">Your latest document analyses</p>
-            </div>
-            <Link to="/dashboard" className="ustats-view-all-link">
-              View All Reports
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-            </Link>
-          </div>
-
-          {recentActivity.length === 0 ? (
-            <div className="ustats-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-              </svg>
-              <h3>No reports yet</h3>
-              <p>Upload your first document to see your activity here</p>
-              <Link to="/dashboard" className="ustats-upload-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="12" y1="5" x2="12" y2="19"/>
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                Upload Document
-              </Link>
-            </div>
-          ) : (
-            <div className="ustats-activity-list">
-              {recentActivity.map((submission) => {
-                const similarity = submission.similarity_score || 0;
-                const riskLevel = calculateRiskLevel(similarity, null, statisticsRiskOptions);
-                return (
-                  <div key={submission.id} className="ustats-activity-item">
-                    <div className="ustats-activity-icon">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="#1e40af" strokeWidth="2">
-                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                      </svg>
-                    </div>
-                    <div className="ustats-activity-content">
-                      <span className="ustats-activity-name">{submission.filename}</span>
-                      <span className="ustats-activity-date">{formatDate(submission.uploaded_at)}</span>
-                    </div>
-                    <div className="ustats-activity-stats">
-                      {submission.status === 'completed' ? (
-                        <>
-                          <span className={`ustats-activity-score ${riskLevel}`}>
-                            {similarity.toFixed(0)}%
-                          </span>
-                          <span className={`ustats-activity-risk ${riskLevel}`}>
-                            {getRiskLabel(riskLevel)}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="ustats-activity-pending">{submission.status}</span>
-                      )}
-                    </div>
-                    <button
-                      className="ustats-activity-action"
-                      onClick={() => navigate(`/results/${submission.id}`)}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
-                        <polyline points="15 3 21 3 21 9"/>
-                        <line x1="10" y1="14" x2="21" y2="3"/>
-                      </svg>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </section>
       </main>
     </div>

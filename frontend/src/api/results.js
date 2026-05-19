@@ -11,6 +11,14 @@ export const submissionsAPI = {
 
   getResults: (submissionId) => api.get(`/submissions/${submissionId}/results`),
 
+  getOverlappingTerms: ({ limit = 5, minCount = 1 } = {}) => {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      min_count: String(minCount),
+    });
+    return api.get(`/submissions/overlapping-terms?${params.toString()}`);
+  },
+
   process: (submissionId) => api.post(`/process/${submissionId}`),
 
   delete: (submissionId) => api.delete(`/submissions/${submissionId}`),

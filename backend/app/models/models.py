@@ -1,6 +1,9 @@
 import json
 import sqlite3
+import time
+from collections import Counter
 from datetime import datetime, timezone, timedelta
+from threading import Lock
 from ..utils.database import get_db_connection
 
 
@@ -1715,6 +1718,160 @@ class Submission:
 
 
 class SimilarityResult:
+    _OVERLAPPING_TERMS_CACHE = {}
+    _OVERLAPPING_TERMS_CACHE_TTL_SECONDS = 60
+    _OVERLAPPING_TERMS_CACHE_LOCK = Lock()
+
+    @classmethod
+    def _normalize_overlapping_terms_filters(cls, limit, min_count):
+        """Normalize and clamp overlapping terms filters."""
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 15
+
+        try:
+            min_count = int(min_count)
+        except (TypeError, ValueError):
+            min_count = 1
+
+        limit = max(1, min(limit, 50))
+        min_count = max(1, min(min_count, 1000))
+        return limit, min_count
+
+    @classmethod
+    def invalidate_user_overlapping_terms_cache(cls, user_id):
+        """Invalidate cached overlapping terms entries for a user."""
+        try:
+            normalized_user_id = int(user_id)
+        except (TypeError, ValueError):
+            return
+
+        with cls._OVERLAPPING_TERMS_CACHE_LOCK:
+            keys_to_remove = [
+                key for key in cls._OVERLAPPING_TERMS_CACHE
+                if key[0] == normalized_user_id
+            ]
+            for key in keys_to_remove:
+                cls._OVERLAPPING_TERMS_CACHE.pop(key, None)
+
+    @classmethod
+    def get_user_overlapping_terms(cls, user_id, limit=15, min_count=1):
+        """Aggregate top overlapping terms for a user from stored match evidence."""
+        from ..utils.text_processing import TextProcessor
+
+        try:
+            normalized_user_id = int(user_id)
+        except (TypeError, ValueError):
+            return {
+                'terms': [],
+                'analyzed_submissions': 0,
+            }
+
+        limit, min_count = cls._normalize_overlapping_terms_filters(limit, min_count)
+        cache_key = (normalized_user_id, limit, min_count)
+        now_ts = time.time()
+
+        with cls._OVERLAPPING_TERMS_CACHE_LOCK:
+            expired_keys = [
+                key for key, payload in cls._OVERLAPPING_TERMS_CACHE.items()
+                if now_ts - payload['cached_at'] > cls._OVERLAPPING_TERMS_CACHE_TTL_SECONDS
+            ]
+            for key in expired_keys:
+                cls._OVERLAPPING_TERMS_CACHE.pop(key, None)
+
+            cached_payload = cls._OVERLAPPING_TERMS_CACHE.get(cache_key)
+            if cached_payload:
+                cached_data = cached_payload['data']
+                return {
+                    'terms': [dict(item) for item in cached_data['terms']],
+                    'analyzed_submissions': cached_data['analyzed_submissions'],
+                }
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT COUNT(*) AS analyzed_submissions
+                FROM submissions
+                WHERE user_id = ?
+                  AND status = 'completed'
+            ''', (normalized_user_id,))
+            analyzed_submissions_row = cursor.fetchone()
+            analyzed_submissions = int(
+                (analyzed_submissions_row['analyzed_submissions'] if analyzed_submissions_row else 0) or 0
+            )
+
+            cursor.execute('''
+                SELECT s.id AS submission_id, sr.match_details
+                FROM submissions s
+                JOIN similarity_results sr ON sr.submission_id = s.id
+                WHERE s.user_id = ?
+                  AND s.status = 'completed'
+                  AND sr.match_details IS NOT NULL
+                  AND sr.match_details != ''
+            ''', (normalized_user_id,))
+            rows = [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+        term_counter = Counter()
+        for row in rows:
+            raw_match_details = row.get('match_details')
+            if not raw_match_details:
+                continue
+
+            if isinstance(raw_match_details, dict):
+                parsed_match_details = raw_match_details
+            else:
+                try:
+                    parsed_match_details = json.loads(raw_match_details)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+
+            matches = parsed_match_details.get('matches')
+            if not isinstance(matches, list):
+                continue
+
+            for match in matches:
+                if not isinstance(match, dict):
+                    continue
+
+                submission_sentence = match.get('submission_sentence')
+                if not isinstance(submission_sentence, dict):
+                    continue
+
+                sentence_text = submission_sentence.get('text')
+                if not isinstance(sentence_text, str) or not sentence_text.strip():
+                    continue
+
+                tokens = TextProcessor.clean_text(sentence_text, remove_stopwords=True)
+                if tokens:
+                    term_counter.update(tokens)
+
+        terms = [
+            {'term': term, 'count': count}
+            for term, count in term_counter.items()
+            if count >= min_count
+        ]
+        terms.sort(key=lambda item: (-item['count'], item['term']))
+
+        response_data = {
+            'terms': terms[:limit],
+            'analyzed_submissions': analyzed_submissions,
+        }
+
+        with cls._OVERLAPPING_TERMS_CACHE_LOCK:
+            cls._OVERLAPPING_TERMS_CACHE[cache_key] = {
+                'cached_at': now_ts,
+                'data': {
+                    'terms': [dict(item) for item in response_data['terms']],
+                    'analyzed_submissions': response_data['analyzed_submissions'],
+                },
+            }
+
+        return response_data
+
     @staticmethod
     def create_batch(submission_id, results):
         """Create multiple similarity results at once

@@ -598,6 +598,67 @@
   flex: 1;
 }
 
+.ustats-terms-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background-color: #f8fafc;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.ustats-terms-state.loading {
+  color: #6b7280;
+}
+
+.ustats-terms-state.error {
+  border-color: #fecaca;
+  background-color: #fef2f2;
+  color: #991b1b;
+}
+
+.ustats-terms-state.error p {
+  margin: 0;
+}
+
+.ustats-terms-state.empty {
+  border-style: dashed;
+}
+
+.ustats-terms-state.empty p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.ustats-terms-state.empty span {
+  color: #6b7280;
+}
+
+.ustats-terms-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #fca5a5;
+  background-color: #fff;
+  color: #b91c1c;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ustats-terms-refresh-btn:hover {
+  border-color: #ef4444;
+  background-color: #fef2f2;
+}
+
 .ustats-term-item {
   display: flex;
   align-items: center;
@@ -672,230 +733,6 @@
   color: #9ca3af;
 }
 
-/* Recent Activity Section */
-.ustats-activity {
-  background-color: #fff;
-  border-radius: 12px;
-  padding: 24px;
-  border: 1px solid #f1f5f9;
-}
-
-.ustats-activity-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.ustats-activity-header h2 {
-  font-size: 18px;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 4px;
-}
-
-.ustats-activity-subtitle {
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.ustats-view-all-link {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #1e40af;
-  text-decoration: none;
-  transition: color 0.2s;
-}
-
-.ustats-view-all-link:hover {
-  color: #1e3a8a;
-}
-
-.ustats-activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ustats-activity-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 16px;
-  border-radius: 10px;
-  transition: background-color 0.2s;
-}
-
-.ustats-activity-item:hover {
-  background-color: #f8fafc;
-}
-
-.ustats-activity-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background-color: #eff6ff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.ustats-activity-icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-.ustats-activity-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.ustats-activity-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #111827;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ustats-activity-date {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.ustats-activity-stats {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.ustats-activity-score {
-  font-size: 15px;
-  font-weight: 700;
-  min-width: 40px;
-  text-align: right;
-}
-
-.ustats-activity-score.low {
-  color: #059669;
-}
-
-.ustats-activity-score.medium {
-  color: #d97706;
-}
-
-.ustats-activity-score.high {
-  color: #dc2626;
-}
-
-.ustats-activity-risk {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 500;
-  min-width: 80px;
-  justify-content: center;
-}
-
-.ustats-activity-risk.low {
-  background-color: #d1fae5;
-  color: #059669;
-}
-
-.ustats-activity-risk.medium {
-  background-color: #fef3c7;
-  color: #d97706;
-}
-
-.ustats-activity-risk.high {
-  background-color: #fee2e2;
-  color: #dc2626;
-}
-
-.ustats-activity-pending {
-  font-size: 13px;
-  color: #6b7280;
-  font-style: italic;
-}
-
-.ustats-activity-action {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background-color: transparent;
-  border: 1px solid #e5e7eb;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: #6b7280;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.ustats-activity-action:hover {
-  background-color: #eff6ff;
-  border-color: #1e40af;
-  color: #1e40af;
-}
-
-/* Empty State */
-.ustats-empty {
-  text-align: center;
-  padding: 48px 24px;
-}
-
-.ustats-empty svg {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 16px;
-  color: #d1d5db;
-}
-
-.ustats-empty h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: #374151;
-  margin-bottom: 8px;
-}
-
-.ustats-empty p {
-  font-size: 14px;
-  color: #6b7280;
-  margin-bottom: 20px;
-}
-
-.ustats-upload-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 24px;
-  background-color: #1e40af;
-  color: #fff;
-  border: none;
-  border-radius: 50px;
-  font-size: 14px;
-  font-weight: 500;
-  text-decoration: none;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.ustats-upload-btn:hover {
-  background-color: #1e3a8a;
-}
-
 /* Footer */
 .ustats-footer {
   padding: 20px 32px;
@@ -964,25 +801,6 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
-  }
-
-  .ustats-activity-item {
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 12px;
-  }
-
-  .ustats-activity-stats {
-    width: 100%;
-    justify-content: flex-start;
-    padding-left: 56px;
-  }
-
-  .ustats-activity-action {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
   }
 
   .ustats-footer {
