@@ -1686,7 +1686,7 @@ class Submission:
                     '''
                     UPDATE reviewer_invites
                     SET status = 'revoked',
-                        token_hash = 'revoked:' || lower(hex(randomblob(32)))
+                        token_hash = 'revoked:' || token_hash
                     WHERE submission_id = ? AND status = 'pending'
                     ''',
                     (submission_id,),
@@ -3191,23 +3191,51 @@ class ReviewerInvite:
         from ..utils.invite_tokens import hash_token, is_expired
 
         token_hash = hash_token(raw_token)
+        consumed_hash = f'consumed:{token_hash}'
+        expired_hash = f'expired:{token_hash}'
+        revoked_hash = f'revoked:{token_hash}'
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
             row = cursor.execute(
-                'SELECT * FROM reviewer_invites WHERE token_hash = ?',
-                (token_hash,),
+                '''
+                SELECT *
+                FROM reviewer_invites
+                WHERE token_hash IN (?, ?, ?, ?)
+                ORDER BY CASE token_hash
+                    WHEN ? THEN 0
+                    WHEN ? THEN 1
+                    WHEN ? THEN 2
+                    WHEN ? THEN 3
+                    ELSE 4
+                END
+                LIMIT 1
+                ''',
+                (
+                    token_hash,
+                    consumed_hash,
+                    expired_hash,
+                    revoked_hash,
+                    token_hash,
+                    consumed_hash,
+                    expired_hash,
+                    revoked_hash,
+                ),
             ).fetchone()
             if not row:
                 raise ValueError('invalid')
             row = dict(row)
+            if row.get('status') == 'consumed':
+                raise ValueError('consumed')
+            if row.get('status') == 'expired':
+                raise ValueError('expired')
             if row.get('status') != 'pending':
                 raise ValueError('not_pending')
             if is_expired(row.get('expires_at')):
                 cursor.execute(
                     '''
                     UPDATE reviewer_invites
-                    SET status = 'expired', token_hash = 'expired:' || lower(hex(randomblob(32)))
+                    SET status = 'expired', token_hash = 'expired:' || token_hash
                     WHERE id = ?
                     ''',
                     (row['id'],),
@@ -3215,6 +3243,60 @@ class ReviewerInvite:
                 conn.commit()
                 raise ValueError('expired')
             return row
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_consumed_by_token(raw_token):
+        from ..utils.invite_tokens import hash_token
+
+        token_hash = f"consumed:{hash_token(raw_token)}"
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            row = cursor.execute(
+                '''
+                SELECT * FROM reviewer_invites
+                WHERE token_hash = ? AND status = 'consumed'
+                ''',
+                (token_hash,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_latest_consumed_by_user(user_id, institutional_email=None):
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            if institutional_email:
+                row = cursor.execute(
+                    '''
+                    SELECT *
+                    FROM reviewer_invites
+                    WHERE status = 'consumed'
+                      AND consumed_by = ?
+                      AND lower(trim(institutional_email)) = lower(trim(?))
+                    ORDER BY COALESCE(consumed_at, created_at) DESC, id DESC
+                    LIMIT 1
+                    ''',
+                    (user_id, institutional_email),
+                ).fetchone()
+                if row:
+                    return dict(row)
+
+            row = cursor.execute(
+                '''
+                SELECT *
+                FROM reviewer_invites
+                WHERE status = 'consumed' AND consumed_by = ?
+                ORDER BY COALESCE(consumed_at, created_at) DESC, id DESC
+                LIMIT 1
+                ''',
+                (user_id,),
+            ).fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 
@@ -3230,7 +3312,7 @@ class ReviewerInvite:
                 SET status = 'consumed',
                     consumed_at = CURRENT_TIMESTAMP,
                     consumed_by = ?,
-                    token_hash = 'consumed:' || lower(hex(randomblob(32)))
+                    token_hash = 'consumed:' || token_hash
                 WHERE id = ?
                 ''',
                 (user_id, invite_id),
@@ -3253,7 +3335,7 @@ class ReviewerInvite:
                 '''
                 UPDATE reviewer_invites
                 SET status = 'revoked',
-                    token_hash = 'revoked:' || lower(hex(randomblob(32)))
+                    token_hash = 'revoked:' || token_hash
                 WHERE id = ?
                 ''',
                 (invite_id,),
@@ -3276,7 +3358,7 @@ class ReviewerInvite:
                 '''
                 UPDATE reviewer_invites
                 SET status = 'revoked',
-                    token_hash = 'revoked:' || lower(hex(randomblob(32)))
+                    token_hash = 'revoked:' || token_hash
                 WHERE submission_id = ? AND status = 'pending'
                 ''',
                 (submission_id,),

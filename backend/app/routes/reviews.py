@@ -1,6 +1,5 @@
 import os
 import json
-import secrets
 from flask import Blueprint, request, jsonify, send_file
 from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification, ReviewerInvite, Institution
 from ..utils.auth import (
@@ -10,6 +9,7 @@ from ..utils.auth import (
 from ..utils.mailer import send_reviewer_invite_email
 from ..utils.serializers import serialize_assignment, serialize_assignment_list
 from datetime import datetime
+from ...config import BIO_MAX_LEN
 
 reviews_bp = Blueprint('reviews', __name__)
 
@@ -299,18 +299,55 @@ def consume_invitation():
     data = request.get_json(silent=True) or {}
     token = (data.get('token') or '').strip()
     username = (data.get('username') or '').strip()
+    password = data.get('password')
+    bio = data.get('bio')
+    if not isinstance(password, str):
+        password = ''
+    if not isinstance(bio, str):
+        bio = ''
+    bio = bio.strip()
 
     if not token:
         return jsonify({'error': 'Missing invitation token.'}), 400
+
+    def completed_invite_payload(invite_row):
+        submission_id = invite_row.get('submission_id') if invite_row else None
+        return {
+            'already_completed': True,
+            'message': 'Invitation already completed',
+            'submission_id': submission_id,
+            'dashboard_path': '/dashboard',
+            'report_path': f"/reviewer/assignments/{submission_id}" if submission_id else '/reviewer',
+        }
+
+    def resolve_legacy_completed_for_current_user():
+        current_user = get_current_user()
+        if not current_user:
+            return None
+        return ReviewerInvite.get_latest_consumed_by_user(
+            current_user.get('id'),
+            current_user.get('email'),
+        )
 
     try:
         invite = ReviewerInvite.get_by_token(token)
     except ValueError as e:
         code = str(e)
+        if code == 'consumed':
+            consumed_invite = ReviewerInvite.get_consumed_by_token(token)
+            if not consumed_invite:
+                consumed_invite = resolve_legacy_completed_for_current_user()
+            if consumed_invite:
+                return jsonify(completed_invite_payload(consumed_invite)), 200
+            return jsonify({'error': 'This invitation link is no longer active.'}), 400
         if code == 'expired':
             return jsonify({'error': 'This invitation link has expired.'}), 400
         if code == 'not_pending':
             return jsonify({'error': 'This invitation link is no longer active.'}), 400
+        if code == 'invalid':
+            consumed_invite = resolve_legacy_completed_for_current_user()
+            if consumed_invite:
+                return jsonify(completed_invite_payload(consumed_invite)), 200
         return jsonify({'error': 'This invitation link is invalid.'}), 400
 
     submission = Submission.get_by_id(invite['submission_id'])
@@ -344,6 +381,10 @@ def consume_invitation():
                     'invited_email': invite['institutional_email'],
                     'submission_id': invite['submission_id'],
                 }), 200
+            if not bio:
+                return jsonify({'error': 'Bio is required to complete account setup.'}), 400
+            if len(bio) > BIO_MAX_LEN:
+                return jsonify({'error': f'Bio must be under {BIO_MAX_LEN} characters'}), 400
 
             # Robustness: Check if username belongs to the same email
             existing_by_username = User.get_by_username(username)
@@ -354,8 +395,12 @@ def consume_invitation():
                     return jsonify({'error': 'Username already exists'}), 409
 
             if not user:
-                temp_password = secrets.token_urlsafe(24)
-                password_hash = hash_password(temp_password)
+                if not password:
+                    return jsonify({'error': 'Password is required to complete account setup.'}), 400
+                if len(password) < 8:
+                    return jsonify({'error': 'Password must be at least 8 characters.'}), 400
+
+                password_hash = hash_password(password)
                 try:
                     user_id = User.create(username, invite['institutional_email'], password_hash, role='reviewer')
                     user = User.get_by_id(user_id)
@@ -363,9 +408,12 @@ def consume_invitation():
                     # Final fallback check by email
                     existing = User.get_by_email(invite['institutional_email'])
                     if existing:
+                        User.update_password(existing['id'], password_hash)
                         user = existing
                     else:
                         return jsonify({'error': str(e)}), 400
+
+            User.update_bio(user['id'], bio)
 
     try:
         Reviewer.ensure_invited_reviewer(

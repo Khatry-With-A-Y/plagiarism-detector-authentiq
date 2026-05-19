@@ -73,9 +73,11 @@ export const reviewsAPI = {
         api.get('/reviews/assignments/summary'),
 
     // Reviewer invitation magic-link consumption.
-    consumeInvite: (token, username = null) => {
+    consumeInvite: (token, username = null, password = null, bio = null) => {
         const payload = { token };
         if (username) payload.username = username;
+        if (password) payload.password = password;
+        if (bio !== null) payload.bio = bio;
         return api.post('/reviews/invitations/consume', payload);
     },
 

@@ -7,17 +7,23 @@ import '../auth.css';
 
 function InviteReviewer() {
   const navigate = useNavigate();
-  const [state, setState] = useState('loading'); // loading | needs_profile | mismatch | error
+  const [state, setState] = useState('loading'); // loading | needs_profile | completed | mismatch | error
   const [errorMsg, setErrorMsg] = useState('');
   const [invitedEmail, setInvitedEmail] = useState('');
+  const [completedSubmissionId, setCompletedSubmissionId] = useState(null);
+  const [completedReportPath, setCompletedReportPath] = useState('');
+  const [completedDashboardPath, setCompletedDashboardPath] = useState('/dashboard');
   const [currentEmail, setCurrentEmail] = useState('');
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [bio, setBio] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const requestedRef = useRef(false);
 
   const token = (new URLSearchParams(window.location.search).get('token') || '').trim();
 
-  const consumeInvite = (usernameOverride = null) => {
+  const consumeInvite = (profileOverride = null) => {
     if (!token) {
       setState('error');
       setErrorMsg('No invitation token was found in the URL.');
@@ -27,12 +33,27 @@ function InviteReviewer() {
     setSubmitting(true);
     setErrorMsg('');
     reviewsAPI
-      .consumeInvite(token, usernameOverride)
+      .consumeInvite(
+        token,
+        profileOverride?.username || null,
+        profileOverride?.password || null,
+        profileOverride?.bio ?? null
+      )
       .then((res) => {
         const data = res.data || {};
         if (data.needs_profile) {
           setInvitedEmail(data.invited_email || '');
           setState('needs_profile');
+          return;
+        }
+        if (data.already_completed) {
+          const submissionId = data.submission_id || null;
+          setCompletedSubmissionId(submissionId);
+          setCompletedReportPath(
+            data.report_path || (submissionId ? `/reviewer/assignments/${submissionId}` : '/reviewer')
+          );
+          setCompletedDashboardPath(data.dashboard_path || '/dashboard');
+          setState('completed');
           return;
         }
         if (data.token && data.user) {
@@ -53,7 +74,7 @@ function InviteReviewer() {
           return;
         }
         const apiError = err?.response?.data?.error;
-        if (usernameOverride) {
+        if (profileOverride?.username) {
           setState('needs_profile');
           setErrorMsg(apiError || 'We could not save that username. Please try another or contact support.');
           return;
@@ -78,13 +99,48 @@ function InviteReviewer() {
       setErrorMsg('Please enter a username to continue.');
       return;
     }
-    consumeInvite(username.trim());
+    if (!bio.trim()) {
+      setErrorMsg('Please enter your short biography to continue.');
+      return;
+    }
+    if (bio.length > 2000) {
+      setErrorMsg('Bio must be under 2000 characters.');
+      return;
+    }
+    if (!password) {
+      setErrorMsg('Please enter a password to continue.');
+      return;
+    }
+    if (password.length < 8) {
+      setErrorMsg('Password must be at least 8 characters.');
+      return;
+    }
+    if (!confirmPassword) {
+      setErrorMsg('Please confirm your password.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMsg('Passwords do not match.');
+      return;
+    }
+    consumeInvite({ username: username.trim(), password, bio: bio.trim() });
   };
 
   const handleSwitchAccount = () => {
     clearAuth();
     setState('loading');
     consumeInvite();
+  };
+
+  const handleOpenCompletedReport = () => {
+    navigate(
+      completedReportPath ||
+      (completedSubmissionId ? `/reviewer/assignments/${completedSubmissionId}` : '/reviewer')
+    );
+  };
+
+  const handleOpenDashboard = () => {
+    navigate(completedDashboardPath || '/dashboard');
   };
 
   const card = (
@@ -106,10 +162,10 @@ function InviteReviewer() {
 
       {state === 'needs_profile' && (
         <>
-          <h2 style={{ marginBottom: '8px' }}>Welcome, Reviewer!</h2>
+          <h2 style={{ marginBottom: '8px' }}>Looks like it&apos;s your first time here!</h2>
           <p style={{ color: '#374151', marginTop: '4px' }}>
             This invite is for <strong>{invitedEmail || 'your institutional email'}</strong>.
-            Please choose a username to finish setup.
+            Please choose a username, password, and short biography to finish your first-time setup.
           </p>
           <div style={{ marginTop: '20px', textAlign: 'left' }}>
             <label className="auth-input-label">Username</label>
@@ -121,16 +177,85 @@ function InviteReviewer() {
               onChange={(e) => setUsername(e.target.value)}
               disabled={submitting}
             />
+            <label className="auth-input-label" style={{ marginTop: '12px', display: 'block' }}>Password</label>
+            <input
+              type="password"
+              className="auth-input-field"
+              placeholder="Enter a password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              disabled={submitting}
+            />
+            <label className="auth-input-label" style={{ marginTop: '12px', display: 'block' }}>Confirm Password</label>
+            <input
+              type="password"
+              className="auth-input-field"
+              placeholder="Confirm your password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              disabled={submitting}
+            />
+            <label className="auth-input-label" style={{ marginTop: '12px', display: 'block' }}>Short Biography / Credentials</label>
+            <textarea
+              className="auth-input-field"
+              style={{ minHeight: '140px', padding: '14px', resize: 'vertical', lineHeight: 1.5 }}
+              placeholder="Briefly describe your academic background, research interests, and expertise..."
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              disabled={submitting}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+              <p className="apply-help-text">
+                Markdown is not supported. Plain text only.
+              </p>
+              <span
+                className={
+                  'apply-help-text' +
+                  (bio.length > 2000 ? ' error' : '')
+                }
+              >
+                {bio.length} / 2000
+              </span>
+            </div>
             {errorMsg && (
               <p style={{ color: '#dc2626', fontSize: '12px', marginTop: '8px' }}>{errorMsg}</p>
             )}
-            <button
-              className="dashboard-btn-primary"
-              style={{ width: '100%', marginTop: '16px' }}
-              onClick={handleSubmitProfile}
-              disabled={submitting}
-            >
-              {submitting ? 'Saving…' : 'Continue to review'}
+            <div style={{ marginTop: '16px', textAlign: 'center' }}>
+              <button
+                className="dashboard-btn-primary"
+                onClick={handleSubmitProfile}
+                disabled={submitting || bio.length > 2000}
+              >
+                {submitting ? 'Saving…' : 'Continue to review'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {state === 'completed' && (
+        <>
+          <h2 style={{ marginBottom: '8px' }}>You&apos;re all set!</h2>
+          <p style={{ color: '#374151', marginTop: '4px' }}>
+            This invitation has already been completed.
+            You can continue from your dashboard or open the assigned report directly.
+          </p>
+          <div
+            style={{
+              marginTop: '20px',
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <button className="dashboard-btn-primary" onClick={handleOpenCompletedReport}>
+              Go to report
+            </button>
+            <button className="dashboard-view-link" onClick={handleOpenDashboard}>
+              Go to main dashboard
             </button>
           </div>
         </>
