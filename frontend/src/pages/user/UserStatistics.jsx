@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { submissionsAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import Avatar from '../../components/Avatar';
+import { processAdaptiveTrendData, generatePlaceholderTrend } from '../../utils/trendUtils';
 import './userStatistics.css';
 
 function UserStatistics({ isEmbedded = false }) {
@@ -13,6 +14,9 @@ function UserStatistics({ isEmbedded = false }) {
   const [termsLoading, setTermsLoading] = useState(true);
   const [termsError, setTermsError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [trendData, setTrendData] = useState(() => processAdaptiveTrendData([], 'similarity_score'));
+  const [trendLoading, setTrendLoading] = useState(true);
+  const [trendError, setTrendError] = useState('');
   const navigate = useNavigate();
 
   const fetchOverlappingTerms = async ({ isActiveRef } = {}) => {
@@ -56,7 +60,7 @@ function UserStatistics({ isEmbedded = false }) {
     }
 
     const isActiveRef = { current: true };
-    fetchSubmissions();
+    fetchSubmissions({ isActiveRef, showPageLoader: true });
 
     (async () => {
       await fetchOverlappingTerms({ isActiveRef });
@@ -67,20 +71,59 @@ function UserStatistics({ isEmbedded = false }) {
     };
   }, [navigate, user]);
 
-  const fetchSubmissions = async () => {
+  const fetchSubmissions = async ({ isActiveRef, showPageLoader = false, showTrendLoader = true } = {}) => {
+    if (isActiveRef && !isActiveRef.current) {
+      return;
+    }
+
+    if ((!isActiveRef || isActiveRef.current) && showPageLoader) {
+      setLoading(true);
+    }
+
+    if ((!isActiveRef || isActiveRef.current) && showTrendLoader) {
+      setTrendLoading(true);
+      setTrendError('');
+    }
+
     try {
       const response = await submissionsAPI.getAll();
-      setSubmissions(response.data.submissions || []);
+      const fetchedSubmissions = response?.data?.submissions || [];
+
+      if (isActiveRef && !isActiveRef.current) {
+        return;
+      }
+
+      setSubmissions(fetchedSubmissions);
+      setTrendData(processAdaptiveTrendData(fetchedSubmissions, 'similarity_score'));
+      setTrendError('');
     } catch (err) {
+      if (isActiveRef && !isActiveRef.current) {
+        return;
+      }
+
       console.error('Failed to fetch submissions:', err);
+      setSubmissions([]);
+      setTrendData(processAdaptiveTrendData([], 'similarity_score'));
+      setTrendError('Unable to load originality trend right now.');
     } finally {
-      setLoading(false);
+      if (!isActiveRef || isActiveRef.current) {
+        if (showPageLoader) {
+          setLoading(false);
+        }
+        if (showTrendLoader) {
+          setTrendLoading(false);
+        }
+      }
     }
   };
 
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const handleTrendRetry = () => {
+    fetchSubmissions({ showTrendLoader: true });
   };
 
   // Calculate user statistics
@@ -124,26 +167,6 @@ function UserStatistics({ isEmbedded = false }) {
     return pages;
   };
 
-  // Calculate trend (compare this month vs last month average)
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-
-  const thisMonthCompleted = completedSubmissions.filter(s => new Date(s.uploaded_at) >= thisMonthStart);
-  const lastMonthCompleted = completedSubmissions.filter(s => {
-    const date = new Date(s.uploaded_at);
-    return date >= lastMonthStart && date <= lastMonthEnd;
-  });
-
-  const thisMonthAvg = thisMonthCompleted.length > 0
-    ? thisMonthCompleted.reduce((acc, s) => acc + (s.similarity_score || 0), 0) / thisMonthCompleted.length
-    : 0;
-  const lastMonthAvg = lastMonthCompleted.length > 0
-    ? lastMonthCompleted.reduce((acc, s) => acc + (s.similarity_score || 0), 0) / lastMonthCompleted.length
-    : 0;
-
-  const trendChange = lastMonthAvg > 0 ? (thisMonthAvg - lastMonthAvg) : 0;
-  const trendImproving = trendChange < 0;
-
   const highestTermCount = topOverlappingTerms[0]?.count || 1;
 
   // Generate sparkline data for reports trend
@@ -164,30 +187,34 @@ function UserStatistics({ isEmbedded = false }) {
 
   const sparklineData = generateSparklineData();
   const maxSparkline = Math.max(...sparklineData, 1);
-
-  // Generate originality trend data
-  const generateOriginalityTrend = () => {
-    const months = 5;
-    const data = [];
-    for (let i = months - 1; i >= 0; i--) {
-      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-      const monthSubmissions = completedSubmissions.filter(s => {
-        const date = new Date(s.uploaded_at);
-        return date >= monthStart && date <= monthEnd;
-      });
-      const avg = monthSubmissions.length > 0
-        ? monthSubmissions.reduce((acc, s) => acc + (s.similarity_score || 0), 0) / monthSubmissions.length
-        : null;
-      data.push({
-        month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
-        value: avg
-      });
-    }
-    return data;
+  const trendSummary = trendData?.trendSummary || {
+    text: 'Track your originality improvements over time',
+    badgeText: '',
+    direction: 'flat',
+    tone: 'neutral',
+    showBadge: false
   };
-
-  const originalityTrendData = generateOriginalityTrend();
+  const trendImproving = trendData?.trendImproving ?? false;
+  const trendMonths = trendData?.months || [];
+  const trendLinePath = trendData?.linePath || '';
+  const trendAreaPath = trendData?.areaPath || '';
+  const plottableTrendPoints = trendData?.plottablePoints || 0;
+  const placeholderTrend = generatePlaceholderTrend();
+  const trendGranularity = trendData?.granularity || 'month';
+  const trendGranularityLabel = trendData?.granularityLabel || 'monthly';
+  const trendUsesFallback = Boolean(trendData?.usedFallbackGranularity);
+  const trendPeriodUnit = trendGranularity === 'day'
+    ? 'day'
+    : trendGranularity === 'week'
+      ? 'week'
+      : 'month';
+  const trendEmptyHint = `Submit completed reports to start tracking your ${trendGranularityLabel} originality.`;
+  const trendInsufficientHint = `Add submissions in another ${trendPeriodUnit} to unlock a ${trendGranularityLabel} trend.`;
+  const trendPlaceholderTitle = plottableTrendPoints === 0
+    ? 'No originality trend available yet'
+    : 'Not enough data to draw a trend line';
+  const trendPlaceholderHint = plottableTrendPoints === 0 ? trendEmptyHint : trendInsufficientHint;
+  const trendChartColor = trendImproving ? '#22c55e' : '#1e40af';
 
   if (loading) {
     return (
@@ -403,79 +430,103 @@ function UserStatistics({ isEmbedded = false }) {
                 </svg>
                 <h3>Originality Trend</h3>
               </div>
-              {trendChange !== 0 && (
-                <div className={`ustats-trend-badge ${trendImproving ? 'positive' : 'negative'}`}>
+              {trendSummary.showBadge && (
+                <div className={`ustats-trend-badge ${trendSummary.tone === 'positive' ? 'positive' : 'negative'}`}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    {trendImproving ? (
+                    {trendSummary.direction === 'down' ? (
                       <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
                     ) : (
                       <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
                     )}
                   </svg>
-                  <span>{Math.abs(trendChange).toFixed(1)}% vs last month</span>
+                  <span>{trendSummary.badgeText}</span>
                 </div>
               )}
             </div>
-            <p className="ustats-trend-subtitle">
-              {trendImproving
-                ? "Your average similarity decreased — improving originality!"
-                : trendChange > 0
-                  ? "Your average similarity increased — consider reviewing recent submissions"
-                  : "Track your originality improvements over time"}
-            </p>
+            <p className="ustats-trend-subtitle">{trendSummary.text}</p>
+            {!trendLoading && !trendError && trendUsesFallback && (
+              <p className="ustats-trend-context">
+                Showing {trendGranularityLabel} trend because monthly data is still limited.
+              </p>
+            )}
 
-            <div className="ustats-trend-chart">
-              <div className="ustats-trend-y-axis">
-                <span>50%</span>
-                <span>25%</span>
-                <span>0%</span>
+            {trendLoading ? (
+              <div className="ustats-trend-state loading">
+                <div className="ustats-trend-skeleton" aria-hidden="true"></div>
+                <p>Loading originality trend…</p>
               </div>
-              <div className="ustats-trend-area">
-                <div className="ustats-trend-grid">
-                  <div className="ustats-trend-grid-line"></div>
-                  <div className="ustats-trend-grid-line"></div>
-                  <div className="ustats-trend-grid-line"></div>
-                </div>
-                <svg viewBox="0 0 200 80" preserveAspectRatio="none" className="ustats-trend-svg">
+            ) : trendError ? (
+              <div className="ustats-trend-state error">
+                <p>{trendError}</p>
+                <button
+                  type="button"
+                  className="ustats-trend-refresh-btn"
+                  onClick={handleTrendRetry}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : plottableTrendPoints <= 1 ? (
+              <div className="ustats-trend-placeholder">
+                <svg viewBox="0 0 200 80" preserveAspectRatio="none" className="ustats-trend-placeholder-svg" aria-hidden="true">
                   <defs>
-                    <linearGradient id="trendGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor={trendImproving ? "#22c55e" : "#1e40af"} stopOpacity="0.2"/>
-                      <stop offset="100%" stopColor={trendImproving ? "#22c55e" : "#1e40af"} stopOpacity="0.02"/>
+                    <linearGradient id="trendPlaceholderGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="#94a3b8" stopOpacity="0.28"/>
+                      <stop offset="100%" stopColor="#94a3b8" stopOpacity="0.06"/>
                     </linearGradient>
                   </defs>
-                  {originalityTrendData.filter(d => d.value !== null).length > 1 && (
-                    <>
-                      <path
-                        d={`M ${originalityTrendData.map((d, i) => {
-                          if (d.value === null) return '';
-                          const x = (i / (originalityTrendData.length - 1)) * 200;
-                          const y = 80 - (d.value / 50) * 80;
-                          return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-                        }).filter(Boolean).join(' ')} L 200 80 L 0 80 Z`}
-                        fill="url(#trendGradient)"
-                      />
-                      <path
-                        d={originalityTrendData.map((d, i) => {
-                          if (d.value === null) return '';
-                          const x = (i / (originalityTrendData.length - 1)) * 200;
-                          const y = 80 - (d.value / 50) * 80;
-                          return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-                        }).filter(Boolean).join(' ')}
-                        fill="none"
-                        stroke={trendImproving ? "#22c55e" : "#1e40af"}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                      />
-                    </>
-                  )}
+                  <path d={placeholderTrend.areaPath} fill="url(#trendPlaceholderGradient)" />
+                  <path
+                    d={placeholderTrend.linePath}
+                    fill="none"
+                    stroke="#94a3b8"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
+                <div className="ustats-trend-placeholder-overlay">
+                  <p>{trendPlaceholderTitle}</p>
+                  <span>{trendPlaceholderHint}</span>
+                </div>
               </div>
-              <div className="ustats-trend-x-axis">
-                {originalityTrendData.map((d, i) => (
-                  <span key={i}>{d.month}</span>
-                ))}
+            ) : (
+              <div className="ustats-trend-chart">
+                <div className="ustats-trend-y-axis">
+                  <span>50%</span>
+                  <span>25%</span>
+                  <span>0%</span>
+                </div>
+                <div className="ustats-trend-area">
+                  <div className="ustats-trend-grid">
+                    <div className="ustats-trend-grid-line"></div>
+                    <div className="ustats-trend-grid-line"></div>
+                    <div className="ustats-trend-grid-line"></div>
+                  </div>
+                  <svg viewBox="0 0 200 80" preserveAspectRatio="none" className="ustats-trend-svg">
+                    <defs>
+                      <linearGradient id="trendGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor={trendChartColor} stopOpacity="0.2"/>
+                        <stop offset="100%" stopColor={trendChartColor} stopOpacity="0.02"/>
+                      </linearGradient>
+                    </defs>
+                    <path d={trendAreaPath} fill="url(#trendGradient)" />
+                    <path
+                      d={trendLinePath}
+                      fill="none"
+                      stroke={trendChartColor}
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </div>
+                <div className="ustats-trend-x-axis">
+                  {trendMonths.map((month, index) => (
+                    <span key={`${month.label}-${index}`}>{month.label}</span>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Top Overlapping Terms */}
