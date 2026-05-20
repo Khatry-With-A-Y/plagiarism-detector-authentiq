@@ -44,23 +44,23 @@ function Landing() {
           <Link to="/register" className="primary-btn">
             Start My First Check
           </Link>
-          <Link to="/login" className="secondary-btn">
-            View Sample Report
-          </Link>
+          <a href="#how-it-works" className="secondary-btn">
+            See How It Works
+          </a>
         </div>
 
         <div className="stats">
           <div className="stat-item">
-            <h3>99.9%</h3>
-            <p>UPTIME</p>
+            <h3>4 Formats</h3>
+            <p>TXT, PDF, DOC, and DOCX uploads supported</p>
           </div>
           <div className="stat-item">
-            <h3>1M+</h3>
-            <p>SOURCES</p>
+            <h3>100 MB</h3>
+            <p>Maximum file size accepted per submission</p>
           </div>
           <div className="stat-item">
-            <h3>~60s</h3>
-            <p>AVERAGE SPEED</p>
+            <h3>72 Hours</h3>
+            <p>Reviewer decision window for each peer-review request</p>
           </div>
         </div>
       </section>
@@ -162,11 +162,11 @@ function Landing() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="section">
+      <section id="how-it-works" className="section">
         <h2 className="section-title">How it Works</h2>
 
         <p className="section-subtitle">
-          Beneath the simple interface lies a sophisticated analysis engine built for precision.
+          At a glance: upload your file, review similarity evidence, and follow the peer-review decision flow.
         </p>
 
         <div className="cards-wrapper">
@@ -177,10 +177,9 @@ function Landing() {
                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
             </div>
-            <h3 className="card-title">Phrase-Level Analysis</h3>
+            <h3 className="card-title">Upload Supported Files</h3>
             <p className="card-text">
-              We go beyond keyword matching. Our advanced system identifies phrase-level
-              similarities, recognizing patterns even when wording is slightly altered.
+              Start checks with TXT, PDF, DOC, or DOCX documents up to 100 MB per submission.
             </p>
           </div>
 
@@ -193,10 +192,9 @@ function Landing() {
                 <line x1="16" y1="17" x2="8" y2="17" />
               </svg>
             </div>
-            <h3 className="card-title">Academic Comparison</h3>
+            <h3 className="card-title">Get Similarity Evidence</h3>
             <p className="card-text">
-              Robust comparison against millions of academic sources including journals,
-              institutional repositories and historical archives.
+              Each check uses n-gram TF-IDF + cosine similarity with sentence-level matches and reference-section exclusion.
             </p>
           </div>
 
@@ -207,10 +205,9 @@ function Landing() {
                 <polyline points="12 6 12 12 16 14" />
               </svg>
             </div>
-            <h3 className="card-title">Instant Results</h3>
+            <h3 className="card-title">Route to Peer Review</h3>
             <p className="card-text">
-              Our optimized engine delivers results in seconds allowing you to
-              iterate on your work and meet deadlines with confidence.
+              Low-similarity candidates can enter a double-blind 5-reviewer panel with a 72-hour decision window.
             </p>
           </div>
         </div>
@@ -297,14 +294,13 @@ function Landing() {
       </section>
 
       {/* FOOTER */}
-      <footer className="footer">
-        <div className="footer-links">
-          <a href="#">Terms of Service</a>
-          <a href="#">Privacy Policy</a>
-          <a href="#">Cookies</a>
-          <a href="#">Contact Us</a>
+      <footer className="dashboard-footer">
+        <p className="dashboard-footer-copyright">© 2026 Authentiq Plagiarism Detection. All rights reserved.</p>
+        <div className="dashboard-footer-links">
+          <a href="#" className="dashboard-footer-link">Privacy Policy</a>
+          <a href="#" className="dashboard-footer-link">Terms of Service</a>
+          <a href="#" className="dashboard-footer-link">Contact Support</a>
         </div>
-        <p className="footer-copyright">© 2026 Authentiq. All rights reserved.</p>
       </footer>
     </div>
   );
