@@ -340,7 +340,7 @@ function ReviewerApplications() {
                               >
                                 {bioModal.app.email_verified ? 'Verified ✓' : 'Unverified ✗'}
                               </span>
-                              {bioModal.app.email_verified && bioModal.app.email_verified_at && (
+                              {!!bioModal.app.email_verified && bioModal.app.email_verified_at && (
                                 <p style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
                                     Verified on {new Date(bioModal.app.email_verified_at).toLocaleString()}
                                 </p>

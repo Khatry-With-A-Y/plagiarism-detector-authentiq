@@ -146,14 +146,14 @@ def _ensure_user(conn, username, email, role, password):
     ).fetchone()
     if row is None:
         cur.execute(
-            "INSERT INTO users (username, email, password_hash, role, status) "
-            "VALUES (?, ?, ?, ?, 'active')",
+            "INSERT INTO users (username, email, password_hash, role, status, avatar_url, bio) "
+            "VALUES (?, ?, ?, ?, 'active', NULL, NULL)",
             (username, email, _hash(password), role)
         )
         return cur.lastrowid, "created"
     # Refresh password + role idempotently.
     cur.execute(
-        "UPDATE users SET email=?, password_hash=?, role=?, status='active' "
+        "UPDATE users SET email=?, password_hash=?, role=?, status='active', avatar_url=NULL, bio=NULL "
         "WHERE id=?",
         (email, _hash(password), role, row["id"])
     )
@@ -169,12 +169,21 @@ def _ensure_reviewer_profile(conn, user_id, username, domain, name, status):
             user_id, application_status, submitted_at, reviewed_at, reviewed_by,
             decision_reason, institution_domain, institution_name,
             affiliation, institutional_email, bio, expertise_tags,
-            verified_at, revoked_at, revoked_by, revoke_reason
+            verified_at, revoked_at, revoked_by, revoke_reason,
+            email_verified, email_verified_at,
+            email_verification_token_hash, email_verification_expires_at,
+            last_verification_sent_at, verification_sent_count,
+            verification_window_started_at,
+            paused_at, paused_by, paused_reason, paused_until, last_pause_eval_at
         ) VALUES (
             :user_id, :application_status, :now, :reviewed_at, :reviewed_by,
             :decision_reason, :institution_domain, :institution_name,
             :affiliation, :institutional_email, :bio, :expertise_tags,
-            :verified_at, NULL, NULL, NULL
+            :verified_at, NULL, NULL, NULL,
+            :email_verified, :email_verified_at,
+            NULL, NULL, :last_verification_sent_at, :verification_sent_count,
+            :verification_window_started_at,
+            NULL, NULL, NULL, NULL, NULL
         )
         ON CONFLICT(user_id) DO UPDATE SET
             application_status  = excluded.application_status,
@@ -190,7 +199,19 @@ def _ensure_reviewer_profile(conn, user_id, username, domain, name, status):
             verified_at         = excluded.verified_at,
             revoked_at          = NULL,
             revoked_by          = NULL,
-            revoke_reason       = NULL
+            revoke_reason       = NULL,
+            email_verified      = excluded.email_verified,
+            email_verified_at   = excluded.email_verified_at,
+            email_verification_token_hash = NULL,
+            email_verification_expires_at = NULL,
+            last_verification_sent_at = excluded.last_verification_sent_at,
+            verification_sent_count   = excluded.verification_sent_count,
+            verification_window_started_at = excluded.verification_window_started_at,
+            paused_at           = NULL,
+            paused_by           = NULL,
+            paused_reason       = NULL,
+            paused_until        = NULL,
+            last_pause_eval_at  = NULL
     """, {
         "user_id":             user_id,
         "application_status":  status,
@@ -206,6 +227,11 @@ def _ensure_reviewer_profile(conn, user_id, username, domain, name, status):
                                 "Seeded for end-to-end peer-review demo."),
         "expertise_tags":      json.dumps(["CS"]),
         "verified_at":         now if status == "approved" else None,
+        "email_verified":      1 if status == "approved" else 0,
+        "email_verified_at":   now if status == "approved" else None,
+        "last_verification_sent_at": now if status == "approved" else None,
+        "verification_sent_count": 1 if status == "approved" else 0,
+        "verification_window_started_at": now if status == "approved" else None,
     })
 
 
@@ -214,7 +240,7 @@ def _ensure_reviewer_profile(conn, user_id, username, domain, name, status):
 # ---------------------------------------------------------------------------
 def main():
     print("=" * 70)
-    print("Authentiq — demo data seed")
+    print("Authentiq -- demo data seed")
     print("=" * 70)
     if not DB_PATH.exists():
         print(f"!! Database not found at {DB_PATH}.", file=sys.stderr)
@@ -252,17 +278,17 @@ def main():
     print("Demo credentials (password = username)")
     print("=" * 70)
     print(f"  Admin       : admin / admin                       (legacy account, reused)")
-    print(f"  Reviewers   : ram, sita, manish                    (KU  — Kathmandu University)")
-    print(f"                hari, dipesh, sunita                 (PU  — Pokhara University)")
-    print(f"                gita, bishnu, sushma                 (IoE — Institute of Engineering)")
-    print(f"                nabin, kabita, suman                 (TU  — Tribhuvan University)")
+    print(f"  Reviewers   : ram, sita, manish                    (KU  -- Kathmandu University)")
+    print(f"                hari, dipesh, sunita                 (PU  -- Pokhara University)")
+    print(f"                gita, bishnu, sushma                 (IoE -- Institute of Engineering)")
+    print(f"                nabin, kabita, suman                 (TU  -- Tribhuvan University)")
     print(f"  Users       : krishna, radha, arjun, prakash, maya")
     print()
     print("Pool sizing: 12 reviewers / 4 institutions gives `assign_many`")
-    print("a 7-reviewer backfill buffer beyond the initial 5-pick — enough")
-    print("to demo decline → auto-replacement through several chained declines.")
+    print("a 7-reviewer backfill buffer beyond the initial 5-pick -- enough")
+    print("to demo decline -> auto-replacement through several chained declines.")
     print()
-    print("Done. Re-run anytime — the script is idempotent.")
+    print("Done. Re-run anytime -- the script is idempotent.")
 
 
 if __name__ == "__main__":

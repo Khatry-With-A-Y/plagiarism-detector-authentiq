@@ -12,6 +12,7 @@ sys.path.insert(0, root_dir)
 
 import backend.app.utils.database as db_utils
 import backend.config as config
+from backend.app.models.models import Reviewer
 
 def test_database_initialization_stores_ngrams():
     """Test that init_database properly stores processed ngrams for existing corpus."""
@@ -87,6 +88,256 @@ def test_database_initialization_stores_ngrams():
         
     finally:
         # Restore original path and cleanup
+        config.DATABASE_PATH = original_db_path
+        db_utils.DATABASE_PATH = original_db_path
+        if test_db_path.exists():
+            test_db_path.unlink()
+
+
+def test_migrate_legacy_reviewer_status_trigger_allows_pending_apply():
+    """Legacy reviewers trigger should be removed by init_database()."""
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
+        test_db_path = Path(tmp_file.name)
+
+    original_db_path = config.DATABASE_PATH
+
+    try:
+        config.DATABASE_PATH = test_db_path
+        db_utils.DATABASE_PATH = test_db_path
+
+        conn = sqlite3.connect(test_db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT DEFAULT 'user' CHECK(role IN ('user', 'reviewer', 'admin')),
+                status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked', 'paused')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE reviewers (
+                user_id INTEGER PRIMARY KEY,
+                application_status TEXT NOT NULL DEFAULT 'approved'
+                    CHECK(application_status IN ('approved', 'rejected')),
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                reviewed_by INTEGER,
+                decision_reason TEXT,
+                institution_domain TEXT NOT NULL,
+                institution_name TEXT,
+                affiliation TEXT NOT NULL,
+                institutional_email TEXT NOT NULL UNIQUE,
+                bio TEXT,
+                expertise_tags TEXT NOT NULL DEFAULT '["CS"]',
+                verified_at TIMESTAMP,
+                revoked_at TIMESTAMP,
+                revoked_by INTEGER,
+                revoke_reason TEXT,
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                email_verified_at TIMESTAMP,
+                email_verification_token_hash TEXT,
+                email_verification_expires_at TIMESTAMP,
+                last_verification_sent_at TIMESTAMP,
+                verification_sent_count INTEGER NOT NULL DEFAULT 0,
+                verification_window_started_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TRIGGER reviewers_app_status_validate_insert
+            BEFORE INSERT ON reviewers
+            FOR EACH ROW
+            WHEN NEW.application_status NOT IN ('approved', 'rejected')
+            BEGIN
+                SELECT RAISE(ABORT, 'Invalid application_status');
+            END;
+        ''')
+
+        cursor.execute('''
+            CREATE TRIGGER reviewers_app_status_validate_update
+            BEFORE UPDATE OF application_status ON reviewers
+            FOR EACH ROW
+            WHEN NEW.application_status NOT IN ('approved', 'rejected')
+            BEGIN
+                SELECT RAISE(ABORT, 'Invalid application_status');
+            END;
+        ''')
+
+        cursor.execute(
+            "INSERT INTO users (username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)",
+            ('legacy-user', 'legacy@example.com', 'hash', 'user', 'active')
+        )
+        user_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        # Reproduce the legacy failure before migration.
+        try:
+            Reviewer.apply(
+                user_id,
+                'kathford.edu.np',
+                'Kathford International College of Engineering and Management',
+                'Student',
+                'legacy@kathford.edu.np',
+                'Legacy reviewer application',
+                ['CS']
+            )
+            assert False, "Expected legacy trigger to reject pending application_status"
+        except ValueError as exc:
+            assert 'Application failed: Invalid application_status' in str(exc)
+
+        # Migration should normalize status guards and allow apply().
+        db_utils.init_database()
+        raw_token = Reviewer.apply(
+            user_id,
+            'kathford.edu.np',
+            'Kathford International College of Engineering and Management',
+            'Student',
+            'legacy@kathford.edu.np',
+            'Legacy reviewer application',
+            ['CS']
+        )
+        assert isinstance(raw_token, str) and raw_token
+
+        conn = db_utils.get_db_connection()
+        row = conn.execute(
+            'SELECT application_status FROM reviewers WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row['application_status'] == 'pending'
+    finally:
+        config.DATABASE_PATH = original_db_path
+        db_utils.DATABASE_PATH = original_db_path
+        if test_db_path.exists():
+            test_db_path.unlink()
+
+
+def test_migrate_legacy_reviewer_status_check_allows_pending_apply():
+    """Legacy reviewers CHECK should be normalized by init_database()."""
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_file:
+        test_db_path = Path(tmp_file.name)
+
+    original_db_path = config.DATABASE_PATH
+
+    try:
+        config.DATABASE_PATH = test_db_path
+        db_utils.DATABASE_PATH = test_db_path
+
+        conn = sqlite3.connect(test_db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT DEFAULT 'user' CHECK(role IN ('user', 'reviewer', 'admin')),
+                status TEXT DEFAULT 'active' CHECK(status IN ('active', 'blocked', 'paused')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE reviewers (
+                user_id INTEGER PRIMARY KEY,
+                application_status TEXT NOT NULL DEFAULT 'pending_initial'
+                    CHECK(application_status IN (
+                        'pending_initial', 'pending_reverification', 'approved', 'rejected', 'paused'
+                    )),
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                reviewed_by INTEGER,
+                decision_reason TEXT,
+                institution_domain TEXT NOT NULL,
+                institution_name TEXT,
+                affiliation TEXT NOT NULL,
+                institutional_email TEXT NOT NULL UNIQUE,
+                bio TEXT,
+                expertise_tags TEXT NOT NULL DEFAULT '["CS"]',
+                verified_at TIMESTAMP,
+                revoked_at TIMESTAMP,
+                revoked_by INTEGER,
+                revoke_reason TEXT,
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                email_verified_at TIMESTAMP,
+                email_verification_token_hash TEXT,
+                email_verification_expires_at TIMESTAMP,
+                last_verification_sent_at TIMESTAMP,
+                verification_sent_count INTEGER NOT NULL DEFAULT 0,
+                verification_window_started_at TIMESTAMP,
+                paused_at TIMESTAMP,
+                paused_by INTEGER,
+                paused_reason TEXT,
+                paused_until TIMESTAMP,
+                last_pause_eval_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (paused_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+        ''')
+
+        cursor.execute(
+            "INSERT INTO users (username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)",
+            ('legacy-check-user', 'legacy-check@example.com', 'hash', 'user', 'active')
+        )
+        user_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        # Reproduce the reported CHECK failure before migration.
+        try:
+            Reviewer.apply(
+                user_id,
+                'kathford.edu.np',
+                'Kathford International College of Engineering and Management',
+                'Student',
+                'legacy-check@kathford.edu.np',
+                'Legacy reviewer application with CHECK mismatch',
+                ['CS']
+            )
+            assert False, "Expected legacy CHECK to reject pending application_status"
+        except ValueError as exc:
+            assert "Application failed: CHECK constraint failed" in str(exc)
+
+        # Migration should normalize status guards and allow apply().
+        db_utils.init_database()
+        raw_token = Reviewer.apply(
+            user_id,
+            'kathford.edu.np',
+            'Kathford International College of Engineering and Management',
+            'Student',
+            'legacy-check@kathford.edu.np',
+            'Legacy reviewer application with CHECK mismatch',
+            ['CS']
+        )
+        assert isinstance(raw_token, str) and raw_token
+
+        conn = db_utils.get_db_connection()
+        row = conn.execute(
+            'SELECT application_status FROM reviewers WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row['application_status'] == 'pending'
+    finally:
         config.DATABASE_PATH = original_db_path
         db_utils.DATABASE_PATH = original_db_path
         if test_db_path.exists():

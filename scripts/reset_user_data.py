@@ -52,8 +52,12 @@ Usage:
     python scripts/reset_user_data.py --yes --keep-uploads
 
     # Wipe and immediately re-run init_database() so default accounts
-    # come back without needing to start the app:
+    # come back without needing to start the app. This also refreshes
+    # the table schema by DROPping them first:
     python scripts/reset_user_data.py --yes --reinit
+
+    # DROP tables instead of DELETE without re-running init (leaves DB empty):
+    python scripts/reset_user_data.py --yes --drop
 """
 
 import argparse
@@ -141,6 +145,7 @@ def reset(
     do_backup: bool,
     purge_uploads: bool,
     reinit: bool,
+    drop_tables: bool = False,
 ) -> int:
     if not db_path.exists():
         print(f"ERROR: database not found at {db_path}", file=sys.stderr)
@@ -189,13 +194,19 @@ def reset(
         )
         print(f"  papers.source        -> 'corpus_upload' on {cur.rowcount} rows")
 
-        # 4) Wipe user-data tables in dependency-safe order.
-        print("\nWiping user-data tables...")
-        for tbl in TABLES_TO_WIPE:
-            cur.execute(f"DELETE FROM {tbl}")
-            print(f"  DELETE FROM {tbl:<22} -> {cur.rowcount} rows removed")
-            # Reset AUTOINCREMENT counters so IDs start from 1 again.
-            cur.execute("DELETE FROM sqlite_sequence WHERE name = ?", (tbl,))
+        # 4) Wipe or Drop user-data tables in dependency-safe order.
+        if drop_tables:
+            print("\nDropping user-data tables...")
+            for tbl in TABLES_TO_WIPE:
+                cur.execute(f"DROP TABLE IF EXISTS {tbl}")
+                print(f"  DROP TABLE IF EXISTS {tbl}")
+        else:
+            print("\nWiping user-data tables...")
+            for tbl in TABLES_TO_WIPE:
+                cur.execute(f"DELETE FROM {tbl}")
+                print(f"  DELETE FROM {tbl:<22} -> {cur.rowcount} rows removed")
+                # Reset AUTOINCREMENT counters so IDs start from 1 again.
+                cur.execute("DELETE FROM sqlite_sequence WHERE name = ?", (tbl,))
 
         cur.execute("COMMIT;")
 
@@ -223,9 +234,14 @@ def reset(
 
         # 6) Sanity asserts
         for tbl in TABLES_TO_WIPE:
-            if after[tbl] != 0:
-                print(f"\nERROR: {tbl} still has {after[tbl]} rows!", file=sys.stderr)
-                return 4
+            if drop_tables:
+                if after[tbl] != "<missing>":
+                    print(f"\nERROR: {tbl} should have been DROPPED but still exists!", file=sys.stderr)
+                    return 4
+            else:
+                if after[tbl] != 0:
+                    print(f"\nERROR: {tbl} still has {after[tbl]} rows!", file=sys.stderr)
+                    return 4
         if after[TABLE_PRESERVED] != before[TABLE_PRESERVED]:
             print(
                 f"\nERROR: papers row count changed "
@@ -301,7 +317,9 @@ def main(argv=None) -> int:
     parser.add_argument("--keep-uploads", action="store_true",
                         help="do NOT delete files inside backend/data/processed/")
     parser.add_argument("--reinit", action="store_true",
-                        help="run init_database() after wiping to recreate default admin/user accounts")
+                        help="run init_database() after wiping to recreate default admin/user accounts (implies --drop)")
+    parser.add_argument("--drop", action="store_true",
+                        help="DROP tables instead of DELETE (ensures schema is refreshed if used with --reinit)")
     parser.add_argument("--db", type=Path, default=DB_PATH,
                         help=f"path to the SQLite database (default: {DB_PATH})")
     args = parser.parse_args(argv)
@@ -314,6 +332,7 @@ def main(argv=None) -> int:
         do_backup=not args.no_backup,
         purge_uploads=not args.keep_uploads,
         reinit=args.reinit,
+        drop_tables=args.drop or args.reinit,
     )
 
 

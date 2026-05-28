@@ -1,7 +1,41 @@
 import json
+import re
 import sqlite3
 from pathlib import Path
 from ...config import DATABASE_PATH
+
+# Expected vocabulary for reviewers.application_status under the current schema.
+# Kept in sync with the CREATE TABLE in init_database() below.
+_EXPECTED_APPLICATION_STATUS_VALUES = frozenset({'pending', 'approved', 'rejected'})
+
+
+def _extract_application_status_check_values(sql):
+    """Return the set of literal values from a `CHECK(application_status IN (...))`
+    clause inside a CREATE TABLE statement, or None if no such clause exists.
+
+    The returned values are stripped of surrounding quotes and lowercased.
+    Robust to extra whitespace and to quoted/unquoted-but-still-string literals.
+    """
+    if not sql:
+        return None
+    m = re.search(
+        r"CHECK\s*\(\s*application_status\s+IN\s*\(([^)]*)\)\s*\)",
+        sql,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    inside = m.group(1)
+    values = set()
+    for tok in inside.split(','):
+        v = tok.strip()
+        if not v:
+            continue
+        # Strip a single matching pair of surrounding quotes (single or double).
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+            v = v[1:-1]
+        values.add(v.lower())
+    return values
 
 
 def get_db_connection():
@@ -140,6 +174,196 @@ def _migrate_users_status_check(conn):
         except sqlite3.OperationalError:
             pass
         print(f"users.status migration FAILED and was rolled back: {exc}")
+        raise
+    finally:
+        conn.execute('PRAGMA foreign_keys=ON;')
+
+
+def _migrate_reviewers_application_status_constraints(conn):
+    """Normalize legacy `reviewers.application_status` constraints/triggers.
+
+    Some older installs were created with status guards that reject
+    `application_status='pending'` (or custom triggers that raise
+    "Invalid application_status"). Other installs were created with a richer
+    legacy vocabulary such as
+    ``('pending_initial','pending_reverification','approved','rejected','paused')``.
+    Current reviewer apply flow always writes `pending`, so any stale guard
+    that does not contain *exactly* the current vocabulary breaks submissions
+    with `CHECK constraint failed: application_status IN (...)`.
+
+    Idempotent behavior:
+      - If the table CHECK is *exactly* ('pending','approved','rejected') and
+        no legacy trigger is present, this is a no-op.
+      - If only legacy trigger(s) are present, drop those trigger(s).
+      - If the table CHECK is legacy/incompatible, rebuild `reviewers` with
+        the current schema and migrate rows, coercing legacy statuses to the
+        current vocabulary (`pending_initial` / `pending_reverification` /
+        `submitted` → `pending`; `paused` → `approved`; anything else
+        unknown → `pending`).
+    """
+    cursor = conn.cursor()
+    row = cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='reviewers'"
+    ).fetchone()
+    if row is None:
+        return
+
+    existing_sql = row['sql'] or ''
+    existing_status_values = _extract_application_status_check_values(existing_sql)
+    # The schema is considered current only when the CHECK list is *exactly*
+    # the expected vocabulary. A loose substring check (the previous heuristic)
+    # was buggy because `'pending'` is a substring of legacy values such as
+    # `'pending_initial'` / `'pending_reverification'`, which caused stale
+    # schemas to be misclassified as current and INSERTs of `'pending'` to
+    # fail the legacy CHECK at runtime.
+    has_expected_status_check = existing_status_values == _EXPECTED_APPLICATION_STATUS_VALUES
+
+    trigger_rows = cursor.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name='reviewers'"
+    ).fetchall()
+    legacy_triggers = []
+    for trig in trigger_rows:
+        trig_sql = (trig['sql'] or '').lower()
+        if 'application_status' not in trig_sql:
+            continue
+        if 'invalid application_status' in trig_sql or "'pending'" not in trig_sql:
+            legacy_triggers.append(trig['name'])
+
+    if has_expected_status_check and not legacy_triggers:
+        return
+
+    def _drop_legacy_triggers():
+        for trig_name in legacy_triggers:
+            safe_name = trig_name.replace('"', '""')
+            conn.execute(f'DROP TRIGGER IF EXISTS "{safe_name}"')
+
+    if has_expected_status_check and legacy_triggers:
+        print("Dropping legacy reviewers application_status trigger(s)...")
+        try:
+            conn.execute('BEGIN IMMEDIATE;')
+            _drop_legacy_triggers()
+            conn.execute('COMMIT;')
+        except Exception:
+            try:
+                conn.execute('ROLLBACK;')
+            except sqlite3.OperationalError:
+                pass
+            raise
+        return
+
+    print("Migrating reviewers.application_status constraints to current policy...")
+    conn.execute('PRAGMA foreign_keys=OFF;')
+    try:
+        conn.execute('BEGIN EXCLUSIVE;')
+        _drop_legacy_triggers()
+
+        conn.execute('''
+            CREATE TABLE reviewers_new (
+                user_id                         INTEGER PRIMARY KEY,
+                application_status              TEXT NOT NULL DEFAULT 'pending'
+                                                CHECK(application_status IN ('pending','approved','rejected')),
+                submitted_at                    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at                     TIMESTAMP,
+                reviewed_by                     INTEGER,
+                decision_reason                 TEXT,
+                institution_domain              TEXT NOT NULL,
+                institution_name                TEXT,
+                affiliation                     TEXT NOT NULL,
+                institutional_email             TEXT NOT NULL UNIQUE,
+                bio                             TEXT,
+                expertise_tags                  TEXT NOT NULL DEFAULT '["CS"]',
+                verified_at                     TIMESTAMP,
+                revoked_at                      TIMESTAMP,
+                revoked_by                      INTEGER,
+                revoke_reason                   TEXT,
+                email_verified                  INTEGER NOT NULL DEFAULT 0,
+                email_verified_at               TIMESTAMP,
+                email_verification_token_hash   TEXT,
+                email_verification_expires_at   TIMESTAMP,
+                last_verification_sent_at       TIMESTAMP,
+                verification_sent_count         INTEGER NOT NULL DEFAULT 0,
+                verification_window_started_at  TIMESTAMP,
+                paused_at                       TIMESTAMP,
+                paused_by                       INTEGER,
+                paused_reason                   TEXT,
+                paused_until                    TIMESTAMP,
+                last_pause_eval_at              TIMESTAMP,
+                FOREIGN KEY (user_id)     REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (revoked_by)  REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (paused_by)   REFERENCES users(id) ON DELETE SET NULL
+            )
+        ''')
+
+        old_cols = [c['name'] for c in conn.execute("PRAGMA table_info(reviewers)").fetchall()]
+        ordered_cols = [
+            'user_id',
+            'application_status',
+            'submitted_at',
+            'reviewed_at',
+            'reviewed_by',
+            'decision_reason',
+            'institution_domain',
+            'institution_name',
+            'affiliation',
+            'institutional_email',
+            'bio',
+            'expertise_tags',
+            'verified_at',
+            'revoked_at',
+            'revoked_by',
+            'revoke_reason',
+            'email_verified',
+            'email_verified_at',
+            'email_verification_token_hash',
+            'email_verification_expires_at',
+            'last_verification_sent_at',
+            'verification_sent_count',
+            'verification_window_started_at',
+            'paused_at',
+            'paused_by',
+            'paused_reason',
+            'paused_until',
+            'last_pause_eval_at',
+        ]
+        insert_cols = [c for c in ordered_cols if c in old_cols]
+        if insert_cols:
+            select_exprs = []
+            for col in insert_cols:
+                if col == 'application_status':
+                    # Coerce any legacy vocabulary into the current one.
+                    #   * `pending_initial` / `pending_reverification` / `submitted`
+                    #     → `pending`  (these all represent an in-flight application).
+                    #   * `paused` → `approved` (paused reviewers were previously
+                    #     approved; their pause state is carried by `paused_at`).
+                    #   * anything else unknown → `pending` (safe default — the
+                    #     applicant can be re-reviewed by an admin).
+                    select_exprs.append(
+                        "CASE "
+                        "WHEN application_status IN ('pending','approved','rejected') THEN application_status "
+                        "WHEN application_status IN ('pending_initial','pending_reverification','submitted') THEN 'pending' "
+                        "WHEN application_status = 'paused' THEN 'approved' "
+                        "ELSE 'pending' END AS application_status"
+                    )
+                else:
+                    select_exprs.append(col)
+
+            conn.execute(
+                f"INSERT INTO reviewers_new ({', '.join(insert_cols)}) "
+                f"SELECT {', '.join(select_exprs)} FROM reviewers"
+            )
+
+        conn.execute('DROP TABLE reviewers;')
+        conn.execute('ALTER TABLE reviewers_new RENAME TO reviewers;')
+        conn.execute('COMMIT;')
+        conn.execute('PRAGMA foreign_key_check;')
+        print("reviewers.application_status migration completed successfully.")
+    except Exception as exc:
+        try:
+            conn.execute('ROLLBACK;')
+        except sqlite3.OperationalError:
+            pass
+        print(f"reviewers.application_status migration FAILED and was rolled back: {exc}")
         raise
     finally:
         conn.execute('PRAGMA foreign_keys=ON;')
@@ -413,6 +637,11 @@ def init_database():
             FOREIGN KEY (revoked_by)  REFERENCES users(id) ON DELETE SET NULL
         )
     ''')
+
+    # Idempotent migration for legacy installs that still reject
+    # application_status='pending' (table CHECK and/or trigger-based guards).
+    _migrate_reviewers_application_status_constraints(conn)
+
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewers_status ON reviewers(application_status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_reviewers_institution ON reviewers(institution_domain)')
 
