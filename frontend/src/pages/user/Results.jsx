@@ -4,6 +4,7 @@ import useAuth from '../../hooks/useAuth';
 import useFetchResults from '../../hooks/useFetchResults';
 import reviewsAPI from '../../api/reviews';
 import Avatar from '../../components/Avatar';
+import Logo from '../../components/Logo';
 import SimilarityMatchesReport from '../../components/SimilarityMatchesReport';
 import {
   calculateRiskLevel,
@@ -153,14 +154,7 @@ function Results({ id: propId, isEmbedded }) {
       {!isEmbedded && (
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
-          <Link to="/dashboard" className="dashboard-logo">
-            <svg viewBox="0 0 40 40" fill="none">
-              <path d="M20 4L4 12v16l16 8 16-8V12L20 4z" fill="#1e40af"/>
-              <path d="M20 8l12 6v12l-12 6-12-6V14l12-6z" fill="#3b82f6"/>
-              <path d="M16 20l3 3 6-6" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="dashboard-logo-text">Authentiq</span>
-          </Link>
+          <Logo to="/dashboard" className="dashboard-logo" />
           <div className="dashboard-nav-links">
             <button className="dashboard-nav-link" onClick={() => navigate('/dashboard')}>Dashboard</button>
             <button className="dashboard-nav-link active">Report Details</button>
@@ -171,6 +165,7 @@ function Results({ id: propId, isEmbedded }) {
             name={user?.username || 'User'}
             src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
             className="dashboard-avatar"
+            background={user?.role === 'admin' ? '#C53030' : user?.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
             alt={`${user?.username || 'User'} avatar`}
           />
         </div>
@@ -230,7 +225,7 @@ function Results({ id: propId, isEmbedded }) {
                       </svg>
                     </div>
                     <div>
-                      <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#1a1a2e', marginBottom: '4px' }}>
+                      <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#1a1a2e', marginBottom: '4px', fontFamily: 'var(--font-body)' }}>
                         {submission.filename}
                       </h1>
                       <p style={{ fontSize: '14px', color: '#64748b' }}>
@@ -286,7 +281,7 @@ function Results({ id: propId, isEmbedded }) {
                     </svg>
                   )}
                 </div>
-                <h3 style={{ margin: 0, color: '#1a1a2e', fontSize: '18px' }}>Analysis Summary</h3>
+                <h3 style={{ margin: 0, color: '#1a1a2e', fontSize: '18px', fontFamily: 'var(--font-body)' }}>Analysis Summary</h3>
               </div>
               <div className="dashboard-tip-content" style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {results.length === 0 ? (
@@ -315,7 +310,7 @@ function Results({ id: propId, isEmbedded }) {
               <div className="dashboard-reports" style={{ marginBottom: '24px', padding: '24px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '8px' }}>Peer Review & Corpus Inclusion</h3>
+                    <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '8px', fontFamily: 'var(--font-body)' }}>Peer Review & Corpus Inclusion</h3>
                     {submission.review_status ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span className={`dashboard-risk-badge ${

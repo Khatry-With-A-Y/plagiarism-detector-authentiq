@@ -42,7 +42,7 @@ export default function Avatar({
   name,
   src,
   className = '',
-  background = '#1e40af',
+  background = '#6b7280',
   color = '#ffffff',
   onClick,
   alt,

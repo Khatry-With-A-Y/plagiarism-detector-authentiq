@@ -252,14 +252,14 @@
 }
 
 .usermgmt-role-badge.admin {
-  background-color: #eff6ff;
-  color: #1e40af;
+  background-color: #fff5f5;
+  color: #c53030;
 }
 
 .usermgmt-role-badge.reviewer {
-  background-color: #f0fdf4;
-  color: #166534;
-  border: 1px solid #dcfce7;
+  background-color: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
 }
 
 .usermgmt-role-badge.user {

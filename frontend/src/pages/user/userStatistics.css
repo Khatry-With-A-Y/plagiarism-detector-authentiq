@@ -1,9 +1,10 @@
 /* User Statistics Page Styles */
 .user-statistics {
   min-height: 100vh;
-  background-color: #f8fafc;
+  background-color: var(--surface);
   display: flex;
   flex-direction: column;
+  font-family: var(--font-body);
 }
 
 /* Loading State */
@@ -42,8 +43,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 32px;
-  background-color: #fff;
-  border-bottom: 1px solid #e5e7eb;
+  background-color: var(--surface-alt);
+  border-bottom: 1px solid var(--ink-200);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -56,22 +57,7 @@
 }
 
 .ustats-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   text-decoration: none;
-  color: #1e40af;
-}
-
-.ustats-logo-icon {
-  width: 32px;
-  height: 32px;
-}
-
-.ustats-logo-text {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1e40af;
 }
 
 .ustats-nav-links {
@@ -85,22 +71,23 @@
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border-radius: 6px;
+  border-radius: var(--rounded-md, 8px);
   font-size: 14px;
   font-weight: 500;
-  color: #64748b;
+  color: var(--ink-700);
   text-decoration: none;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .ustats-nav-link:hover {
-  color: #1e40af;
-  background-color: #f1f5f9;
+  color: var(--green-600);
+  background-color: var(--green-50);
 }
 
 .ustats-nav-link.active {
-  color: #1e40af;
-  background-color: #eff6ff;
+  color: var(--ink-900);
+  background-color: var(--green-50);
+  font-weight: 600;
 }
 
 .ustats-nav-link svg {
@@ -234,10 +221,12 @@
 }
 
 .ustats-header-content h1 {
-  font-size: 28px;
+  font-family: var(--font-display);
+  font-size: 2.5rem;
   font-weight: 700;
-  color: #111827;
+  color: var(--ink-900);
   margin-bottom: 4px;
+  line-height: 1.2;
 }
 
 .ustats-header-content p {
@@ -254,12 +243,19 @@
 }
 
 .ustats-card {
-  background-color: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  border: 1px solid #f1f5f9;
+  background-color: var(--surface-alt);
+  border-radius: var(--rounded-md, 8px);
+  padding: 24px;
+  border: 1px solid var(--ink-200);
   display: flex;
   flex-direction: column;
+  box-shadow: 0 1px 3px rgba(14, 42, 69, 0.04);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.ustats-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(14, 42, 69, 0.08);
 }
 
 .ustats-card-header {
@@ -270,11 +266,11 @@
 }
 
 .ustats-card-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #6b7280;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink-500);
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.08em;
 }
 
 .ustats-card-icon {
@@ -293,28 +289,28 @@
 }
 
 .ustats-card-icon.blue {
-  background-color: #eff6ff;
-  color: #1e40af;
+  background-color: var(--green-50);
+  color: var(--green-600);
 }
 
 .ustats-card-icon.green {
-  background-color: #dcfce7;
-  color: #16a34a;
+  background-color: var(--green-50);
+  color: var(--green-600);
 }
 
 .ustats-card-icon.yellow {
-  background-color: #fef3c7;
-  color: #d97706;
+  background-color: #FFF9EE;
+  color: #D97706;
 }
 
 .ustats-card-icon.red {
-  background-color: #fee2e2;
-  color: #dc2626;
+  background-color: #FFF5F5;
+  color: #C53030;
 }
 
 .ustats-card-icon.purple {
-  background-color: #f3e8ff;
-  color: #7c3aed;
+  background-color: var(--ink-50);
+  color: var(--ink-700);
 }
 
 .ustats-card-body {
@@ -326,9 +322,10 @@
 }
 
 .ustats-card-value {
-  font-size: 32px;
+  font-family: var(--font-body);
+  font-size: 2.25rem;
   font-weight: 700;
-  color: #111827;
+  color: var(--ink-900);
   line-height: 1;
 }
 
@@ -441,10 +438,10 @@
 
 /* Originality Trend Card */
 .ustats-trend-card {
-  background-color: #fff;
-  border-radius: 12px;
+  background-color: var(--surface-alt);
+  border-radius: var(--rounded-md, 8px);
   padding: 24px;
-  border: 1px solid #f1f5f9;
+  border: 1px solid var(--ink-200);
 }
 
 .ustats-trend-header {
@@ -461,9 +458,10 @@
 }
 
 .ustats-trend-title h3 {
-  font-size: 16px;
+  font-family: var(--font-body);
+  font-size: 1.25rem;
   font-weight: 700;
-  color: #111827;
+  color: var(--ink-900);
 }
 
 .ustats-trend-badge {
@@ -477,13 +475,15 @@
 }
 
 .ustats-trend-badge.positive {
-  background-color: #dcfce7;
-  color: #16a34a;
+  background-color: var(--green-50);
+  color: var(--green-600);
+  border: 1px solid var(--green-200);
 }
 
 .ustats-trend-badge.negative {
-  background-color: #fee2e2;
-  color: #dc2626;
+  background-color: #FFF5F5;
+  color: #C53030;
+  border: 1px solid #FED7D7;
 }
 
 .ustats-trend-badge svg {
@@ -685,10 +685,10 @@
 
 /* Top Overlapping Terms Card */
 .ustats-terms-card {
-  background-color: #fff;
-  border-radius: 12px;
+  background-color: var(--surface-alt);
+  border-radius: var(--rounded-md, 8px);
   padding: 24px;
-  border: 1px solid #f1f5f9;
+  border: 1px solid var(--ink-200);
   display: flex;
   flex-direction: column;
 }
@@ -704,9 +704,10 @@
 }
 
 .ustats-terms-title h3 {
-  font-size: 16px;
+  font-family: var(--font-body);
+  font-size: 1.25rem;
   font-weight: 700;
-  color: #111827;
+  color: var(--ink-900);
 }
 
 .ustats-terms-subtitle {
@@ -793,14 +794,15 @@
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background-color: #f1f5f9;
+  background-color: var(--surface);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 600;
-  color: #64748b;
+  font-weight: 700;
+  color: var(--ink-500);
   flex-shrink: 0;
+  border: 1px solid var(--ink-200);
 }
 
 .ustats-term-text {
@@ -827,7 +829,7 @@
 
 .ustats-term-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #1e40af 0%, #3b82f6 100%);
+  background: linear-gradient(90deg, var(--ink-900) 0%, var(--green-600) 100%);
   border-radius: 3px;
   transition: width 0.3s;
 }
@@ -846,10 +848,11 @@
   gap: 8px;
   margin-top: 16px;
   padding: 12px;
-  background-color: #f8fafc;
+  background-color: var(--green-50);
   border-radius: 8px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--green-600);
+  border: 1px solid var(--green-200);
 }
 
 .ustats-terms-note svg {

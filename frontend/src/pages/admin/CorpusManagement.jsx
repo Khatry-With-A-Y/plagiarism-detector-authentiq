@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { corpusAPI } from '../../api/results';
 import useAuth from '../../hooks/useAuth';
 import Avatar from '../../components/Avatar';
+import Logo from '../../components/Logo';
 import '../dashboard.css';
 
 function CorpusManagement({ isEmbedded = false }) {
@@ -255,14 +256,7 @@ function CorpusManagement({ isEmbedded = false }) {
       {!isEmbedded && (
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
-          <Link to="/" className="dashboard-logo">
-            <svg className="dashboard-logo-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="currentColor" opacity="0.2"/>
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="dashboard-logo-text">Authentiq</span>
-          </Link>
+          <Logo to="/" className="dashboard-logo" />
           <div className="dashboard-nav-links">
             <Link to="/dashboard" className="dashboard-nav-link">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -303,6 +297,7 @@ function CorpusManagement({ isEmbedded = false }) {
               name={user?.username || 'Admin'}
               src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
               className="dashboard-avatar"
+              background={user?.role === 'admin' ? '#C53030' : user?.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
               onClick={() => setShowUserMenu(!showUserMenu)}
             />
             {showUserMenu && (
@@ -332,31 +327,28 @@ function CorpusManagement({ isEmbedded = false }) {
       {/* Main Content */}
       <main className="dashboard-main">
         {/* Page Header */}
-        <section className="dashboard-welcome" style={{ display: 'block', marginBottom: '24px' }}>
-          <h1 className="dashboard-welcome-title">Corpus Management</h1>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginTop: '8px' }}>
-            <p className="dashboard-welcome-subtitle" style={{ marginBottom: 0, flex: 1 }}>
-              Manage and monitor the document corpus used for plagiarism detection.
-              View, search, and remove papers from the indexed collection.
-            </p>
-            <div className="dashboard-welcome-actions" style={{ marginTop: 0, flexShrink: 0 }}>
-              <button className="dashboard-btn-primary" onClick={handleBrowseClick} disabled={isUploading}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="12" y1="5" x2="12" y2="19"/>
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                Upload New Paper
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.doc,.txt"
-                onChange={handleFileChange}
-                style={{ display: 'none' }}
-              />
-            </div>
+        <div className="stats-header">
+          <div className="stats-header-left">
+            <h1>Corpus Management</h1>
+            <p>Manage and monitor the document corpus used for plagiarism detection. View, search, and remove papers from the indexed collection.</p>
           </div>
-        </section>
+          <div className="stats-header-right">
+            <button className="dashboard-btn-primary" onClick={handleBrowseClick} disabled={isUploading}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Upload New Paper
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.doc,.txt"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
+          </div>
+        </div>
 
         {error && (
           <div className="dashboard-error-banner">

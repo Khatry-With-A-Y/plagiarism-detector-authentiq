@@ -8,6 +8,7 @@ import Results from './Results';
 import UserStatistics from './UserStatistics';
 import ReviewBadge from '../../components/ReviewBadge';
 import Avatar from '../../components/Avatar';
+import Logo from '../../components/Logo';
 import ApplyReviewer from '../reviewer/ApplyReviewer';
 import ReviewerDashboard from '../reviewer/ReviewerDashboard';
 import {
@@ -477,20 +478,12 @@ function UserDashboard() {
       {/* Navbar */}
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left" style={{ flex: 1, minWidth: 0 }}>
-          <Link to="/" className="dashboard-logo" style={{ flexShrink: 0 }}>
-            <svg className="dashboard-logo-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="currentColor" opacity="0.2"/>
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="dashboard-logo-text">Authentiq</span>
-          </Link>
+          <Logo to="/" className="dashboard-logo" style={{ flexShrink: 0 }} />
           <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', flexShrink: 0 }}>
               <button 
                 className={`dashboard-nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
                 onClick={() => setActiveTab('dashboard')}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="3" y="3" width="7" height="7"/>
@@ -513,7 +506,6 @@ function UserDashboard() {
                 <button
                   className={`dashboard-nav-link ${activeTab === 'statistics' ? 'active' : ''}`}
                   onClick={() => setActiveTab('statistics')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer' }}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="18" y1="20" x2="18" y2="10"/>
@@ -707,6 +699,7 @@ function UserDashboard() {
               name={user?.username || 'User'}
               src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
               className="dashboard-avatar"
+              background={user?.role === 'admin' ? '#C53030' : user?.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
               onClick={() => setShowUserMenu(!showUserMenu)}
               alt={`${user?.username || 'User'} profile picture`}
             />
@@ -776,7 +769,7 @@ function UserDashboard() {
             </h1>
             <p className="dashboard-welcome-subtitle">
               Maintain the highest standards of academic integrity. Upload your documents
-              for a comprehensive scan against millions of sources and receive detailed
+              for a comprehensive scan against our sources and receive detailed
               originality reports in seconds.
             </p>
             <div className="dashboard-welcome-actions">
@@ -797,9 +790,6 @@ function UserDashboard() {
                   Become a Reviewer
                 </button>
               )}
-              <button className="dashboard-btn-outline">
-                Learn How it Works
-              </button>
             </div>
           </div>
           <div
@@ -944,11 +934,6 @@ function UserDashboard() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              <button className="dashboard-filter-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
-                </svg>
-              </button>
             </div>
           </div>
 
@@ -1003,7 +988,7 @@ function UserDashboard() {
                               </span>
                               {highestMatch > 0 && (
                                 <span style={{ fontSize: '12px', color: '#6b7280' }}>
-                                  Highest Sentence Match: <span style={{ fontWeight: 600, color: highestMatch >= 40 ? '#dc2626' : '#059669' }}>
+                                  Highest Sentence Match: <span style={{ fontWeight: 600, color: highestMatch >= 40 ? 'var(--ink-900)' : 'var(--green-600)' }}>
                                     {formatDashboardPercent(highestMatch)}
                                   </span>
                                 </span>
@@ -1086,10 +1071,7 @@ function UserDashboard() {
         <section className="dashboard-bottom">
           <div className="dashboard-tip-card">
             <div className="dashboard-tip-icon-wrapper">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e40af" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lightbulb-icon lucide-lightbulb"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
             </div>
             <div className="dashboard-tip-content">
               <h3>Tip of the Day</h3>
@@ -1099,13 +1081,6 @@ function UserDashboard() {
                 giving credit to the ideas that helped shape your work. Always double-check
                 your APA/MLA formatting before the final submission.
               </p>
-              <a href="#" className="dashboard-tip-link">
-                View Full Tip
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="5" y1="12" x2="19" y2="12"/>
-                  <polyline points="12 5 19 12 12 19"/>
-                </svg>
-              </a>
             </div>
           </div>
 

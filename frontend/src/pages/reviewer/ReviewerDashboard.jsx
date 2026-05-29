@@ -418,13 +418,6 @@ export default function ReviewerDashboard() {
               Prioritize pending work first to keep turnaround times healthy
               and avoid automatic expiry.
             </p>
-            <button
-              type="button"
-              className="dashboard-btn-outline reviewer-focus-btn"
-              onClick={() => switchTab(DEFAULT_TAB)}
-            >
-              View Pending Queue
-            </button>
           </aside>
         </section>
 

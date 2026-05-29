@@ -21,7 +21,9 @@ instance/
 # IDEs
 .junie
 .vscode/
-.idea/
+.impeccable
+DESIGN.md
+PRODUCT.md
 *.swp
 *.swo
 *~

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import useAuth from '../../hooks/useAuth';
 import Avatar from '../../components/Avatar';
+import Logo from '../../components/Logo';
 import reviewersAPI from '../../api/reviewers';
 import {
   uploadAvatar,
@@ -101,12 +102,13 @@ function ProfileHero({ user, onAvatarUploaded, onAvatarDeleted }) {
           name={user?.username || 'User'}
           src={avatarSrc}
           className="dashboard-avatar"
+          background={user?.role === 'admin' ? '#C53030' : user?.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
           onClick={() => !uploading && fileInputRef.current?.click()}
           alt={`${user?.username || 'User'} profile picture`}
         />
         {uploading && (
           <div className="profile-avatar-spinner-overlay" aria-hidden="true">
-            <span className="profile-spinner" style={{ color: '#fff', width: 24, height: 24 }} />
+            <span className="profile-spinner" style={{ color: 'var(--surface)', width: 24, height: 24 }} />
           </div>
         )}
         <input
@@ -144,7 +146,7 @@ function ProfileHero({ user, onAvatarUploaded, onAvatarDeleted }) {
           )}
         </div>
         {avatarError && (
-          <div className="profile-error-msg" style={{ marginTop: 12, maxWidth: 380 }} role="alert">
+          <div className="profile-error-msg" style={{ marginTop: 12, maxWidth: 380, color: '#C53030' }} role="alert">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
@@ -229,9 +231,9 @@ function ProfileInfoCard({ user }) {
           <span className="profile-info-value">{formatDate(user?.created_at)}</span>
         </div>
         {user?.bio && (
-          <div className="profile-info-row" style={{ alignItems: 'flex-start' }}>
+          <div className="profile-info-row" style={{ alignItems: 'flex-start', borderBottom: 'none' }}>
             <span className="profile-info-label">Bio</span>
-            <span className="profile-info-value" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{user.bio}</span>
+            <span className="profile-info-value" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>{user.bio}</span>
           </div>
         )}
       </div>
@@ -335,9 +337,9 @@ function BioSection({ user, onBioSaved }) {
       {!editing ? (
         <div className="profile-bio-readonly">
           {bio.trim() ? (
-            <p style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#374151', lineHeight: 1.6 }}>{bio}</p>
+            <p style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--ink-700)', lineHeight: 1.6 }}>{bio}</p>
           ) : (
-            <p style={{ margin: 0, color: '#9ca3af', fontStyle: 'italic' }}>
+            <p style={{ margin: 0, color: 'var(--ink-400)', fontStyle: 'italic' }}>
               {isReviewer ? 'No bio added yet. Click Edit to describe your expertise.' : 'No bio added yet. Click Edit to tell others about yourself.'}
             </p>
           )}
@@ -478,7 +480,7 @@ function ChangePasswordSection() {
           aria-controls="pw-section-body"
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1e40af" strokeWidth="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
             </svg>
             Change Password
@@ -641,20 +643,12 @@ export default function UserProfile() {
       {/* Navbar — mirrors UserDashboard navbar */}
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
-          <Link to="/" className="dashboard-logo">
-            <svg className="dashboard-logo-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="currentColor" opacity="0.2"/>
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="dashboard-logo-text">Authentiq</span>
-          </Link>
+          <Logo to="/" className="dashboard-logo" />
 
           <button
             type="button"
             className="dashboard-nav-link"
             onClick={() => navigate('/dashboard')}
-            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 18l-6-6 6-6"/>
@@ -669,6 +663,7 @@ export default function UserProfile() {
               name={localUser?.username || 'User'}
               src={getAvatarSrc(localUser?.avatar_url, null)}
               className="dashboard-avatar"
+              background={localUser?.role === 'admin' ? '#C53030' : localUser?.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
               alt={`${localUser?.username || 'User'} profile picture`}
             />
           </div>
@@ -676,7 +671,7 @@ export default function UserProfile() {
             type="button"
             className="dashboard-nav-link danger"
             onClick={handleLogout}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626' }}
+            style={{ color: '#C53030' }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
               <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>

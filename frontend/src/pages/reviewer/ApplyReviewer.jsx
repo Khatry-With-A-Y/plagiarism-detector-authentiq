@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import reviewersAPI from "../../api/reviewers";
 import useAuth from "../../hooks/useAuth";
 import Avatar from "../../components/Avatar";
+import Logo from "../../components/Logo";
 import "../dashboard.css";
 import "../auth.css";
 
@@ -831,14 +832,7 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
     <div className="dashboard">
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
-          <Link to="/" className="dashboard-logo">
-            <svg className="dashboard-logo-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="currentColor" opacity="0.2"/>
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="dashboard-logo-text">Authentiq</span>
-          </Link>
+          <Logo to="/" className="dashboard-logo" />
           <div className="dashboard-nav-links">
             <Link to="/dashboard" className="dashboard-nav-link">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -871,6 +865,7 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
               name={user?.username || 'User'}
               src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
               className="dashboard-avatar"
+              background={user?.role === 'admin' ? '#C53030' : user?.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
               onClick={() => setShowUserMenu(!showUserMenu)}
             />
             {showUserMenu && (

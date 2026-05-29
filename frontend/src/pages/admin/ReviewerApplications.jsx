@@ -115,166 +115,171 @@ function ReviewerApplications() {
   };
 
   return (
-    <div className="dashboard-card" style={{ marginTop: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <div>
-            <h2 className="dashboard-card-title" style={{ margin: 0 }}>Reviewer Onboarding Queue</h2>
-            <p className="dashboard-subtitle">Manage and verify new reviewer applications</p>
-        </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <span style={{ fontSize: '14px', color: '#64748b' }}>Filter by Status:</span>
-            <select 
-                className="auth-input-field" 
-                style={{ height: '40px', padding: '0 12px', width: '160px', cursor: 'pointer' }}
-                value={filter}
-                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            >
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-                {/* Block 7 (Stage 7c): "Revoked" is a synthetic status — backend
-                    treats it as `revoked_at IS NOT NULL`, and the plain
-                    "Rejected" filter now excludes these rows so admins can
-                    distinguish "application rejected" from "ex-reviewer
-                    revoked". */}
-                <option value="revoked">Revoked</option>
-                <option value="">All Statuses</option>
-            </select>
+    <>
+      <div className="stats-header">
+        <div className="stats-header-left">
+          <h1>Reviewer Onboarding</h1>
+          <p>Manage and verify new reviewer applications.</p>
         </div>
       </div>
 
-      {loading ? (
-        <div className="dashboard-loading" style={{ padding: '60px' }}>Loading applications...</div>
-      ) : error ? (
-        <div className="form-error" style={{ margin: '20px' }}>{error}</div>
-      ) : applications.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: '#64748b', backgroundColor: '#f8fafc', borderRadius: '12px' }}>
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                <circle cx="9" cy="7" r="4"></circle>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-            </svg>
-            <p>No reviewer applications found matching the current filter.</p>
-        </div>
-      ) : (
-        <div className="dashboard-table-container">
-          <table className="dashboard-table">
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>Applicant</th>
-                <th style={{ textAlign: 'left' }}>Institution & Affiliation</th>
-                <th>Status</th>
-                <th>Applied On</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {applications.map((app) => (
-                <tr key={app.user_id}>
-                  <td style={{ textAlign: 'left' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontWeight: 600, color: '#1e293b' }}>{app.username}</span>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>{app.email}</span>
-                    </div>
-                  </td>
-                  <td style={{ textAlign: 'left' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontWeight: 500 }}>{app.institution_name}</span>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>{app.affiliation}</span>
-                    </div>
-                  </td>
-                  <td>
-                    {/* Block 7 (Stage 7c): show 'REVOKED' badge when reviewer was revoked. */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-                      <span className={`dashboard-risk-badge ${
-                        app.revoked_at ? 'high' :
-                        app.application_status === 'approved' ? 'low' :
-                        app.application_status === 'pending' ? 'medium' : 'high'
-                      }`}>
-                          {app.revoked_at ? 'REVOKED' : app.application_status.toUpperCase()}
-                      </span>
-                      {/* Institutional-email verification badge.
-                          The Approve button is gated on this flag both here
-                          and at the API layer; an unverified row cannot be
-                          approved no matter what the UI does. */}
-                      <span
-                        className={`dashboard-risk-badge ${app.email_verified ? 'low' : 'high'}`}
-                        title={app.email_verified
-                          ? 'Applicant clicked the verification link sent to their institutional inbox.'
-                          : 'Applicant has not yet verified their institutional email.'}
-                        style={{ fontSize: '10px' }}
-                      >
-                        {app.email_verified ? 'EMAIL ✓' : 'EMAIL ✗'}
-                      </span>
-                    </div>
-                  </td>
-                  <td style={{ color: '#64748b' }}>{new Date(app.submitted_at).toLocaleDateString()}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                        <button 
-                            className="dashboard-view-link" 
-                            style={{ padding: '6px 12px' }}
-                            onClick={() => openBioModal(app)}
-                        >
-                            View Bio
-                        </button>
-                        {app.application_status === 'pending' && (
-                            <>
-                                <button
-                                    className="dashboard-view-link"
-                                    style={{
-                                        color: '#059669',
-                                        borderColor: '#10b981',
-                                        padding: '6px 12px',
-                                        opacity: app.email_verified ? 1 : 0.5,
-                                        cursor: app.email_verified ? 'pointer' : 'not-allowed',
-                                    }}
-                                    onClick={() => app.email_verified && handleDecisionClick(app, 'approved')}
-                                    disabled={!app.email_verified}
-                                    title={app.email_verified
-                                        ? 'Approve this reviewer application.'
-                                        : 'Applicant has not verified their institutional email.'}
-                                >
-                                    Approve
-                                </button>
-                                <button
-                                    className="dashboard-view-link"
-                                    style={{ color: '#dc2626', borderColor: '#f87171', padding: '6px 12px' }}
-                                    onClick={() => handleDecisionClick(app, 'rejected')}
-                                >
-                                    Reject
-                                </button>
-                            </>
-                        )}
-                        {/* Block 7 (Stage 7c): Revoke action for approved, non-revoked reviewers. */}
-                        {app.application_status === 'approved' && !app.revoked_at && (
-                            <button
-                                className="dashboard-view-link"
-                                style={{ color: '#dc2626', borderColor: '#f87171', padding: '6px 12px' }}
-                                onClick={() => handleRevokeClick(app)}
-                                title="Revoke reviewer privileges; historical assignments remain queryable for audit."
-                            >
-                                Revoke
-                            </button>
-                        )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Pagination Placeholder */}
-      {total > 50 && (
-          <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center', gap: '12px' }}>
-              <button disabled={page === 1} onClick={() => setPage(page - 1)} className="dashboard-view-link">Previous</button>
-              <span style={{ display: 'flex', alignItems: 'center' }}>Page {page}</span>
-              <button disabled={applications.length < 50} onClick={() => setPage(page + 1)} className="dashboard-view-link">Next</button>
+      <section className="dashboard-reports">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <span style={{ fontSize: '14px', color: '#64748b' }}>Filter by Status:</span>
+            <select 
+                  className="auth-input-field" 
+                  style={{ height: '40px', padding: '0 12px', width: '160px', cursor: 'pointer', marginBottom: 0 }}
+                  value={filter}
+                  onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+              >
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  {/* Block 7 (Stage 7c): "Revoked" is a synthetic status — backend
+                      treats it as `revoked_at IS NOT NULL`, and the plain
+                      "Rejected" filter now excludes these rows so admins can
+                      distinguish "application rejected" from "ex-reviewer
+                      revoked". */}
+                  <option value="revoked">Revoked</option>
+                  <option value="">All Statuses</option>
+              </select>
           </div>
-      )}
+        </div>
+
+        {loading ? (
+          <div className="dashboard-loading" style={{ padding: '60px' }}>Loading applications...</div>
+        ) : error ? (
+          <div className="form-error" style={{ margin: '20px' }}>{error}</div>
+        ) : applications.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px', color: '#64748b', backgroundColor: '#f8fafc', borderRadius: '12px' }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '12px', opacity: 0.5 }}>
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="9" cy="7" r="4"></circle>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              <p>No reviewer applications found matching the current filter.</p>
+          </div>
+        ) : (
+          <div className="dashboard-table-container">
+            <table className="dashboard-table">
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Applicant</th>
+                  <th style={{ textAlign: 'left' }}>Institution & Affiliation</th>
+                  <th>Status</th>
+                  <th>Applied On</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {applications.map((app) => (
+                  <tr key={app.user_id}>
+                    <td style={{ textAlign: 'left' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontWeight: 600, color: '#1e293b' }}>{app.username}</span>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>{app.email}</span>
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'left' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontWeight: 500 }}>{app.institution_name}</span>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>{app.affiliation}</span>
+                      </div>
+                    </td>
+                    <td>
+                      {/* Block 7 (Stage 7c): show 'REVOKED' badge when reviewer was revoked. */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                        <span className={`dashboard-risk-badge ${
+                          app.revoked_at ? 'high' :
+                          app.application_status === 'approved' ? 'low' :
+                          app.application_status === 'pending' ? 'medium' : 'high'
+                        }`}>
+                            {app.revoked_at ? 'REVOKED' : app.application_status.toUpperCase()}
+                        </span>
+                        {/* Institutional-email verification badge.
+                            The Approve button is gated on this flag both here
+                            and at the API layer; an unverified row cannot be
+                            approved no matter what the UI does. */}
+                        <span
+                          className={`dashboard-risk-badge ${app.email_verified ? 'low' : 'high'}`}
+                          title={app.email_verified
+                            ? 'Applicant clicked the verification link sent to their institutional inbox.'
+                            : 'Applicant has not yet verified their institutional email.'}
+                          style={{ fontSize: '10px' }}
+                        >
+                          {app.email_verified ? 'EMAIL ✓' : 'EMAIL ✗'}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ color: '#64748b' }}>{new Date(app.submitted_at).toLocaleDateString()}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                          <button 
+                              className="dashboard-view-link" 
+                              style={{ padding: '6px 12px' }}
+                              onClick={() => openBioModal(app)}
+                          >
+                              View Bio
+                          </button>
+                          {app.application_status === 'pending' && (
+                              <>
+                                  <button
+                                      className="dashboard-view-link"
+                                      style={{
+                                          color: '#059669',
+                                          borderColor: '#10b981',
+                                          padding: '6px 12px',
+                                          opacity: app.email_verified ? 1 : 0.5,
+                                          cursor: app.email_verified ? 'pointer' : 'not-allowed',
+                                      }}
+                                      onClick={() => app.email_verified && handleDecisionClick(app, 'approved')}
+                                      disabled={!app.email_verified}
+                                      title={app.email_verified
+                                          ? 'Approve this reviewer application.'
+                                          : 'Applicant has not verified their institutional email.'}
+                                  >
+                                      Approve
+                                  </button>
+                                  <button
+                                      className="dashboard-view-link"
+                                      style={{ color: '#dc2626', borderColor: '#f87171', padding: '6px 12px' }}
+                                      onClick={() => handleDecisionClick(app, 'rejected')}
+                                  >
+                                      Reject
+                                  </button>
+                              </>
+                          )}
+                          {/* Block 7 (Stage 7c): Revoke action for approved, non-revoked reviewers. */}
+                          {app.application_status === 'approved' && !app.revoked_at && (
+                              <button
+                                  className="dashboard-view-link"
+                                  style={{ color: '#dc2626', borderColor: '#f87171', padding: '6px 12px' }}
+                                  onClick={() => handleRevokeClick(app)}
+                                  title="Revoke reviewer privileges; historical assignments remain queryable for audit."
+                              >
+                                  Revoke
+                              </button>
+                          )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination Placeholder */}
+        {total > 50 && (
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                <button disabled={page === 1} onClick={() => setPage(page - 1)} className="dashboard-view-link">Previous</button>
+                <span style={{ display: 'flex', alignItems: 'center' }}>Page {page}</span>
+                <button disabled={applications.length < 50} onClick={() => setPage(page + 1)} className="dashboard-view-link">Next</button>
+            </div>
+        )}
+      </section>
 
       {/* Decision Modal */}
       {decisionModal.show && (
@@ -495,8 +500,8 @@ function ReviewerApplications() {
               </div>
           </div>
       )}
-    </div>
-  );
+  </>
+);
 }
 
 export default ReviewerApplications;

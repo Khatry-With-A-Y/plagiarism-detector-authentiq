@@ -11,6 +11,7 @@ import ReviewQueue from './ReviewQueue';
 // the per-row "View Details" action in UserManagement.jsx.
 import ReviewBadge from '../../components/ReviewBadge';
 import Avatar from '../../components/Avatar';
+import Logo from '../../components/Logo';
 import '../dashboard.css';
 import './adminStatistics.css';
 
@@ -28,7 +29,6 @@ function AdminDashboard() {
   const [processingTime, setProcessingTime] = useState({ average_time: 0, p95_time: 0, trend: [] });
   const [loading, setLoading] = useState(true);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [dateRange] = useState('Last 30 Days');
   const [activeTab, setActiveTab] = useState('dashboard');
   const navigate = useNavigate();
 
@@ -169,19 +169,11 @@ function AdminDashboard() {
       {/* Navbar */}
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
-          <Link to="/" className="dashboard-logo">
-            <svg className="dashboard-logo-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="currentColor" opacity="0.2"/>
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="dashboard-logo-text">Authentiq</span>
-          </Link>
+          <Logo to="/" className="dashboard-logo" />
           <div className="dashboard-nav-links">
             <button
               className={`dashboard-nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
               onClick={() => setActiveTab('dashboard')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="7" height="7"/>
@@ -189,12 +181,11 @@ function AdminDashboard() {
                 <rect x="14" y="14" width="7" height="7"/>
                 <rect x="3" y="14" width="7" height="7"/>
               </svg>
-              Admin Dashboard
+              System Overview
             </button>
             <button
               className={`dashboard-nav-link ${activeTab === 'users' ? 'active' : ''}`}
               onClick={() => setActiveTab('users')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -207,7 +198,6 @@ function AdminDashboard() {
             <button
               className={`dashboard-nav-link ${activeTab === 'corpus' ? 'active' : ''}`}
               onClick={() => setActiveTab('corpus')}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
@@ -251,6 +241,7 @@ function AdminDashboard() {
               name={user?.username || 'Admin'}
               src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
               className="dashboard-avatar"
+              background={user?.role === 'admin' ? '#C53030' : user?.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
               onClick={() => setShowUserMenu(!showUserMenu)}
             />
             {showUserMenu && (
@@ -292,24 +283,10 @@ function AdminDashboard() {
       ) : (
       <main className="dashboard-main">
         {/* Header */}
-        <div className="stats-header" style={{ marginBottom: '2rem' }}>
+        <div className="stats-header">
           <div className="stats-header-left">
             <h1>System Overview</h1>
             <p>Welcome to the Admin Dashboard. Monitor systemwide statistics and operations.</p>
-          </div>
-          <div className="stats-header-right">
-            <div className="stats-date-dropdown">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="21" y2="10"/>
-              </svg>
-              {dateRange}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </div>
           </div>
         </div>
 

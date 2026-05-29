@@ -1,0 +1,39 @@
+.authentiq-logo {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-family: var(--font-logo, 'Plus Jakarta Sans', sans-serif);
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-style: italic;
+  text-decoration: none;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-rendering: optimizeLegibility;
+  cursor: pointer;
+}
+
+.authentiq-logo:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.authentiq-logo .logo-icon {
+  width: 1.4em;
+  height: 1.4em;
+  transform: translateY(0.05em);
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(216, 27, 66, 0.2));
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.authentiq-logo .logo-text {
+  color: #D81B42; /* Fallback */
+  background: linear-gradient(to right, #D81B42, var(--green-500, #5F9A4A));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  padding-right: 0.1em; /* Ensure slanted letters aren't clipped */
+}

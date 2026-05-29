@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import Logo from "../components/Logo";
 import useAuth from "../hooks/useAuth";
 import "./auth.css";
 
@@ -44,13 +45,7 @@ function Register() {
 
       <div className="auth-card-wrapper">
         <div className="auth-header">
-          <div className="auth-logo-container">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="#1e40af" />
-              <path d="M9 12l2 2 4-4" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span className="auth-logo-text">Authentiq</span>
-          </div>
+          <Logo to="/" className="auth-logo-container" />
           <h1>Create your account</h1>
           <p>Join Authentiq to start verifying academic integrity.</p>
         </div>

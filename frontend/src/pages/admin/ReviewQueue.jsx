@@ -616,12 +616,12 @@ function ReviewQueue() {
 
   return (
     <div style={{ padding: '0 24px' }}>
-      <header className="dashboard-header" style={{ marginBottom: '24px' }}>
-        <div>
-          <h1 className="dashboard-title">Peer Review Queue</h1>
-          <p className="dashboard-subtitle">Manage and assign expert reviewers to borderline submissions</p>
+      <div className="stats-header">
+        <div className="stats-header-left">
+          <h1>Peer Review Queue</h1>
+          <p>Manage and assign expert reviewers to borderline submissions.</p>
         </div>
-      </header>
+      </div>
 
       <div className="dashboard-reports">
         <div className="dashboard-reports-header">

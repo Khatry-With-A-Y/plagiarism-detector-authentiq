@@ -19,9 +19,9 @@ const getRiskProfile = (context) => {
 };
 
 const getMatchClassification = (similarity) => {
-  if (similarity >= 0.8) return { label: 'High Match', color: '#dc2626' };
-  if (similarity >= 0.5) return { label: 'Medium Match', color: '#f59e0b' };
-  return { label: 'Possible Paraphrase', color: '#3b82f6' };
+  if (similarity >= 0.8) return { label: 'High Match', color: 'var(--ink-900)' };
+  if (similarity >= 0.5) return { label: 'Medium Match', color: '#D97706' };
+  return { label: 'Possible Paraphrase', color: 'var(--green-600)' };
 };
 
 export default function SimilarityMatchesReport({
@@ -108,7 +108,7 @@ export default function SimilarityMatchesReport({
                     style={{ cursor: hasMatchDetails ? 'pointer' : 'default' }}
                     onClick={() => hasMatchDetails && toggleSourceExpansion(rowKey)}
                   >
-                    <td style={{ fontWeight: '600', color: '#1e40af' }}>#{index + 1}</td>
+                    <td style={{ fontWeight: '700', color: 'var(--green-600)' }}>#{index + 1}</td>
                     <td>
                       <div className="dashboard-doc-cell">
                         <div className="dashboard-doc-icon-small">

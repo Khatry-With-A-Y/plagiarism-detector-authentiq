@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import useAuth from '../../hooks/useAuth';
 import Avatar from '../../components/Avatar';
+import Logo from '../../components/Logo';
 import { adminAPI } from '../../api/results';
 import reviewersAPI from '../../api/reviewers';
 import reviewsAPI from '../../api/reviews';
@@ -295,14 +296,7 @@ function UserManagement({ isEmbedded = false }) {
       {!isEmbedded && (
       <nav className="dashboard-navbar">
         <div className="dashboard-navbar-left">
-          <Link to="/" className="dashboard-logo">
-            <svg className="dashboard-logo-icon" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" fill="currentColor" opacity="0.2"/>
-              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="dashboard-logo-text">Authentiq</span>
-          </Link>
+          <Logo to="/" className="dashboard-logo" />
           <div className="dashboard-nav-links">
             <Link to="/dashboard" className="dashboard-nav-link">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -343,6 +337,7 @@ function UserManagement({ isEmbedded = false }) {
               name={user?.username || 'Admin'}
               src={user?.avatar_url ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://localhost:5000${user.avatar_url}`) : undefined}
               className="dashboard-avatar"
+              background="#C53030"
               onClick={() => setShowUserMenu(!showUserMenu)}
             />
             {showUserMenu && (
@@ -372,9 +367,11 @@ function UserManagement({ isEmbedded = false }) {
       {/* Main Content */}
       <main className="dashboard-main">
         {/* Header */}
-        <div className="usermgmt-header">
-          <h1>User Management</h1>
-          <p>Manage accounts, roles, and platform activity logs.</p>
+        <div className="stats-header">
+          <div className="stats-header-left">
+            <h1>User Management</h1>
+            <p>Manage accounts, roles, and platform activity logs.</p>
+          </div>
         </div>
 
         {/* Filters */}
@@ -464,7 +461,7 @@ function UserManagement({ isEmbedded = false }) {
                           <Avatar
                             name={userItem.username || 'User'}
                             className="usermgmt-avatar"
-                            background={userItem.role === 'admin' ? '#1e40af' : userItem.role === 'reviewer' ? '#166534' : '#6b7280'}
+                            background={userItem.role === 'admin' ? '#C53030' : userItem.role === 'reviewer' ? '#1E90FF' : '#6b7280'}
                             alt={userItem.username}
                           />
                           <div className="usermgmt-user-info">
