@@ -29,6 +29,15 @@ from backend.app.utils.text_processing import TextProcessor
 
 # ── Configuration ──────────────────────────────────────────────────────
 ADMIN_USER_ID = 1
+
+
+def sanitize_title(title):
+    """Convert a paper title to a safe filename (strips unsafe chars, truncates to 150 chars)."""
+    for ch in r'/\:*?"<>|':
+        title = title.replace(ch, '_')
+    return title.strip()[:150]
+
+
 WORKERS = 4  # Number of parallel workers for PDF extraction
 json_path = os.path.join(backend_dir, "data", "raw_papers", "cs_papers.json")
 pdf_dir = os.path.join(backend_dir, "data", "raw_papers")
@@ -254,8 +263,9 @@ def ingest():
     with open(json_path, encoding="utf-8") as f:
         papers_meta = json.load(f)
 
-    # Build lookup: paperId -> metadata
+    # Build lookup: paperId -> metadata and sanitized_title -> metadata
     meta_lookup = {p['paperId']: p for p in papers_meta}
+    title_to_meta = {sanitize_title(p['title']): p for p in papers_meta if p.get('title')}
 
     # Scan PDFs on disk
     pdf_files = sorted(
@@ -324,7 +334,7 @@ def ingest():
         nonlocal success, failed, skipped_empty, api_enriched
 
         filename = result['filename']
-        paper_id_str = os.path.splitext(filename)[0]
+        title_stem = os.path.splitext(filename)[0]
 
         if result['error'] == 'empty':
             skipped_empty += 1
@@ -334,13 +344,14 @@ def ingest():
             print(f"  FAIL: {filename} -- {result['error']}")
             return
 
-        # Get metadata
-        meta = meta_lookup.get(paper_id_str, {})
+        # Get metadata by sanitized title (filename stem)
+        meta = title_to_meta.get(title_stem, {})
         title = meta.get('title')
         authors = meta.get('authors', [])
+        paper_id_str = meta.get('paperId')
 
-        # Enrich if needed
-        if not title or not authors:
+        # Enrich via S2 API if needed (requires a paperId)
+        if (not title or not authors) and paper_id_str:
             api_meta = fetch_paper_metadata(paper_id_str)
             if api_meta:
                 if not title:

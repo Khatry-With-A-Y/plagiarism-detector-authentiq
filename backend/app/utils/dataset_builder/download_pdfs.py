@@ -18,6 +18,13 @@ os.makedirs(pdf_dir, exist_ok=True)
 WORKERS = 10             # number of parallel download threads
 MIN_FILE_SIZE = 50000   # 50KB minimum — anything smaller is likely corrupt or incomplete
 
+
+def sanitize_title(title):
+    """Convert a paper title to a safe filename (strips unsafe chars, truncates to 150 chars)."""
+    for ch in r'/\:*?"<>|':
+        title = title.replace(ch, '_')
+    return title.strip()[:150]
+
 # Multiple User-Agents to rotate
 user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
@@ -61,7 +68,8 @@ for file in os.listdir(pdf_dir):
 # build list of only papers that still need downloading
 pending_papers = [
     p for p in papers
-    if p.get("pdf_url") and p.get("paperId") not in already_downloaded
+    if p.get("openAccessPdf") and p["openAccessPdf"].get("url")
+    and sanitize_title(p.get("title", "")) not in already_downloaded
 ]
 
 print(f"\n=== Download Stats ===")
@@ -91,8 +99,8 @@ start_time = time.time()
 
 def download_paper(p):
     """Downloads a single paper PDF and returns status and message."""
-    url = p.get("pdf_url")
-    filename = os.path.join(pdf_dir, f"{p['paperId']}.pdf")
+    url = p["openAccessPdf"]["url"]
+    filename = os.path.join(pdf_dir, sanitize_title(p["title"]) + ".pdf")
 
     headers = headers_base.copy()
     headers["User-Agent"] = random.choice(user_agents)
@@ -143,10 +151,9 @@ def download_paper(p):
                     continue
                 return "skipped", f"No PDF signature: {url}"
 
-            field = p.get("field", "unknown")
             title = p.get("title", "Unknown Title")
             short_title = title[:50] + "..." if len(title) > 50 else title
-            return "success", f"[{field}]: {short_title}"
+            return "success", short_title
 
         except requests.exceptions.ConnectTimeout:
             if attempt < retries - 1:

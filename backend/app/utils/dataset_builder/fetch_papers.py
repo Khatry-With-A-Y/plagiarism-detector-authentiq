@@ -94,7 +94,7 @@ def fetch_query(query, query_target, verbose=True):
 
     params = {
         "query": query,
-        "fields": "paperId,title,year,openAccessPdf,fieldsOfStudy,authors"
+        "fields": "paperId,title,openAccessPdf,fieldsOfStudy,authors"
     }
 
     while collected < query_target:
@@ -163,10 +163,8 @@ def fetch_query(query, query_target, verbose=True):
             local_papers.append({
                 "paperId": paper_id,
                 "title": paper.get("title"),
-                "year": paper.get("year"),
-                "authors": paper.get("authors"),
-                "pdf_url": pdf_url,
-                "field": query  # which query this paper came from
+                "authors": [{"name": a.get("name")} for a in (paper.get("authors") or [])],
+                "openAccessPdf": {"url": pdf_url}
             })
             collected += 1
 
