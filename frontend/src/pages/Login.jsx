@@ -10,6 +10,7 @@ function Login() {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -27,7 +28,7 @@ function Login() {
     setLoading(true);
 
     try {
-      await login(username.trim(), password);
+      await login(username.trim(), password, rememberMe);
       navigate("/dashboard");
     } catch (err) {
       setError(err.response?.data?.error || "Login failed. Please check your credentials.");
@@ -109,7 +110,12 @@ function Login() {
           </div>
 
           <div className="checkbox-container">
-            <input type="checkbox" id="remember" />
+            <input 
+              type="checkbox" 
+              id="remember" 
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+            />
             <label htmlFor="remember" className="checkbox-label">
               Remember this device
             </label>

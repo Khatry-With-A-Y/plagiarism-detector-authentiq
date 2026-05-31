@@ -1,16 +1,4 @@
-// simple helpers for token/user storage
-
-export const setAuthToken = (token) => {
-  if (token) {
-    localStorage.setItem('token', token);
-  } else {
-    localStorage.removeItem('token');
-  }
-};
-
-export const getAuthToken = () => {
-  return localStorage.getItem('token');
-};
+import { getAccessToken, setAccessToken } from '../api/api';
 
 export const setUser = (user) => {
   if (user) {
@@ -22,11 +10,15 @@ export const setUser = (user) => {
 
 export const getUser = () => {
   const userStr = localStorage.getItem('user');
-  return userStr ? JSON.parse(userStr) : null;
+  try {
+    return userStr ? JSON.parse(userStr) : null;
+  } catch (e) {
+    return null;
+  }
 };
 
 export const isAuthenticated = () => {
-  return !!getAuthToken();
+  return !!getAccessToken();
 };
 
 export const isAdmin = () => {
@@ -35,6 +27,6 @@ export const isAdmin = () => {
 };
 
 export const logout = () => {
-  localStorage.removeItem('token');
+  setAccessToken('');
   localStorage.removeItem('user');
 };

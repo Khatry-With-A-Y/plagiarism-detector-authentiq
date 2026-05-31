@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { reviewsAPI } from '../../api/reviews';
-import { setAuthToken, setUser, logout as clearAuth } from '../../utils/auth';
+import { setAccessToken } from '../../api/api';
+import { setUser, logout as clearAuth } from '../../utils/auth';
 import '../dashboard.css';
 import '../auth.css';
 
@@ -57,7 +58,7 @@ function InviteReviewer() {
           return;
         }
         if (data.token && data.user) {
-          setAuthToken(data.token);
+          setAccessToken(data.token);
           setUser(data.user);
           navigate(`/reviewer/assignments/${data.submission_id}`);
           return;

@@ -23,7 +23,7 @@ def create_app():
     app.config.from_object(config)
 
     # enable CORS
-    CORS(app, origins=CORS_ORIGINS)
+    CORS(app, origins=CORS_ORIGINS, supports_credentials=True)
 
     # ensure required directories exist
     DATA_DIR.mkdir(parents=True, exist_ok=True)

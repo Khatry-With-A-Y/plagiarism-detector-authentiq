@@ -3,8 +3,12 @@ import api from './api';
 export const register = (username, email, password) =>
   api.post('/auth/register', { username, email, password });
 
-export const login = (username, password) =>
-  api.post('/auth/login', { username, password });
+export const login = (username, password, rememberMe = false) =>
+  api.post('/auth/login', { username, password, remember_me: rememberMe });
+
+export const refresh = () => api.post('/auth/refresh');
+
+export const logout = () => api.post('/auth/logout');
 
 export const getCurrentUser = () => api.get('/auth/me');
 
@@ -22,6 +26,8 @@ export const updateBio = (bio) => api.put('/auth/me/bio', { bio });
 export const authAPI = {
   register,
   login,
+  refresh,
+  logout,
   getCurrentUser,
   updatePassword,
   uploadAvatar,

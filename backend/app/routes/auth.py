@@ -5,8 +5,8 @@ from flask import Blueprint, request, jsonify, send_from_directory
 
 from ..models.models import User
 from ..utils.auth import (
-    hash_password, verify_password, generate_token, get_current_user,
-    require_auth, require_admin
+    hash_password, verify_password, generate_access_token, generate_refresh_token,
+    verify_token, get_current_user, require_auth, require_admin
 )
 from ..utils.database import get_db_connection
 from ...config import DATA_DIR
@@ -41,18 +41,31 @@ def register():
         password_hash = hash_password(password)
         user_id = User.create(username, email, password_hash)
         user = User.get_by_id(user_id)
-        token = generate_token(user_id, username, user['role'])
         
-        return jsonify({
+        access_token = generate_access_token(user_id, username, user['role'])
+        refresh_token = generate_refresh_token(user_id)
+        
+        resp = jsonify({
             'message': 'User created successfully',
-            'token': token,
+            'token': access_token,
             'user': {
                 'id': user['id'],
                 'username': user['username'],
                 'email': user['email'],
                 'role': user['role']
             }
-        }), 201
+        })
+        
+        resp.set_cookie(
+            'refresh_token',
+            refresh_token,
+            httponly=True,
+            secure=False,  # Set to True in production
+            samesite='Lax',
+            max_age=None
+        )
+        
+        return resp, 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -77,18 +90,63 @@ def login():
     if not verify_password(user['password_hash'], password):
         return jsonify({'error': 'Incorrect password. Please enter the correct password.'}), 401
     
-    token = generate_token(user['id'], user['username'], user['role'])
+    remember_me = data.get('remember_me', False)
+    access_token = generate_access_token(user['id'], user['username'], user['role'])
+    refresh_token = generate_refresh_token(user['id'])
     
-    return jsonify({
+    resp = jsonify({
         'message': 'Login successful',
-        'token': token,
+        'token': access_token,
         'user': {
             'id': user['id'],
             'username': user['username'],
             'email': user['email'],
             'role': user['role']
         }
+    })
+    
+    refresh_expiry = 30 * 24 * 60 * 60 if remember_me else None
+    
+    resp.set_cookie(
+        'refresh_token',
+        refresh_token,
+        httponly=True,
+        secure=False,
+        samesite='Lax',
+        max_age=refresh_expiry
+    )
+    
+    return resp, 200
+
+
+@auth_bp.route('/refresh', methods=['POST'])
+def refresh():
+    """Refresh access token using refresh token in cookie"""
+    refresh_token = request.cookies.get('refresh_token')
+    if not refresh_token:
+        return jsonify({'error': 'Refresh token missing'}), 401
+    
+    payload = verify_token(refresh_token, expected_type='refresh')
+    if not payload:
+        return jsonify({'error': 'Invalid or expired refresh token'}), 401
+    
+    user = User.get_by_id(payload['user_id'])
+    if not user or user.get('status') == 'blocked':
+        return jsonify({'error': 'User not found or blocked'}), 401
+    
+    new_access_token = generate_access_token(user['id'], user['username'], user['role'])
+    
+    return jsonify({
+        'token': new_access_token
     }), 200
+
+
+@auth_bp.route('/logout', methods=['POST'])
+def logout():
+    """Logout user by clearing refresh token cookie"""
+    resp = jsonify({'message': 'Logged out successfully'})
+    resp.set_cookie('refresh_token', '', expires=0)
+    return resp, 200
 
 
 @auth_bp.route('/me', methods=['GET'])

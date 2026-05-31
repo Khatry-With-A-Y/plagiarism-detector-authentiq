@@ -17,22 +17,36 @@ def verify_password(password_hash, password):
     return check_password_hash(password_hash, password)
 
 
-def generate_token(user_id, username, role):
-    """Generate a JWT token for a user"""
+def generate_access_token(user_id, username, role):
+    """Generate a short-lived access JWT token"""
     payload = {
         'user_id': user_id,
         'username': username,
         'role': role,
-        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS),
+        'type': 'access',
+        'exp': datetime.utcnow() + timedelta(minutes=15),
         'iat': datetime.utcnow()
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
-def verify_token(token):
+def generate_refresh_token(user_id):
+    """Generate a long-lived refresh JWT token"""
+    payload = {
+        'user_id': user_id,
+        'type': 'refresh',
+        'exp': datetime.utcnow() + timedelta(days=30),
+        'iat': datetime.utcnow()
+    }
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def verify_token(token, expected_type='access'):
     """Verify and decode a JWT token"""
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        if payload.get('type') != expected_type:
+            return None
         return payload
     except jwt.ExpiredSignatureError:
         return None

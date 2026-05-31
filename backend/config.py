@@ -18,16 +18,21 @@ MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 ALLOWED_EXTENSIONS = {'.txt', '.pdf', '.doc', '.docx'}
 
 # JWT configuration
-JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
+JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', os.urandom(24))
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_HOURS = 24
 
 # Flask configuration
-SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
+SECRET_KEY = os.environ.get('SECRET_KEY', os.urandom(24))
 DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
 
 # CORS configuration
-CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:5173']  # React dev servers
+CORS_ORIGINS = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173'
+]
 
 # ---------------------------------------------------------------------------
 # Peer-review / Reviewer-role configuration

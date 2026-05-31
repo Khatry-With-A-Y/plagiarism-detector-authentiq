@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { isAuthenticated, isAdmin as checkAdmin } from './utils/auth';
-import { getCurrentUser as apiGetCurrentUser } from './api/auth';
 import Landing from './pages/Landing';
+import useAuth from './hooks/useAuth';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -20,69 +19,52 @@ import './index.css';
 
 // Protected Route component
 const ProtectedRoute = ({ children }) => {
-  return isAuthenticated() ? children : <Navigate to="/login" />;
+  const { isAuthenticated, isInitializing } = useAuth();
+  if (isInitializing) return null;
+  return isAuthenticated ? children : <Navigate to="/login" />;
 };
 
 // Admin Route component
 const AdminRoute = ({ children }) => {
-  return isAuthenticated() && checkAdmin() ? children : <Navigate to="/dashboard" />;
+  const { isAuthenticated, isAdmin, isInitializing } = useAuth();
+  if (isInitializing) return null;
+  return isAuthenticated && isAdmin ? children : <Navigate to="/dashboard" />;
 };
 
 // Reviewer Route component — allows reviewer and admin roles
 const ReviewerRoute = ({ children }) => {
-  const [checkingRole, setCheckingRole] = useState(true);
-  const [canAccess, setCanAccess] = useState(false);
+  const { isAuthenticated, isReviewer, isAdmin, isInitializing } = useAuth();
 
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      setCheckingRole(false);
-      setCanAccess(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    try {
-      const cachedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      if (cachedUser.role === 'reviewer' || cachedUser.role === 'admin') {
-        setCanAccess(true);
-        setCheckingRole(false);
-        return;
-      }
-    } catch {
-      // Ignore malformed local cache and fall back to /auth/me.
-    }
-
-    apiGetCurrentUser()
-      .then((res) => {
-        const freshUser = res.data || {};
-        localStorage.setItem('user', JSON.stringify(freshUser));
-        if (!cancelled) {
-          setCanAccess(freshUser.role === 'reviewer' || freshUser.role === 'admin');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCanAccess(false);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setCheckingRole(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!isAuthenticated()) return <Navigate to="/login" />;
-  if (checkingRole) return null;
-  return canAccess ? children : <Navigate to="/dashboard" />;
+  if (isInitializing) return null;
+  if (!isAuthenticated) return <Navigate to="/login" />;
+  return (isReviewer || isAdmin) ? children : <Navigate to="/dashboard" />;
 };
 
 function App() {
+  const { isInitializing } = useAuth();
+
+  if (isInitializing) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh', 
+        background: '#fff' 
+      }}>
+        <div className="loading-spinner" style={{
+          width: '32px',
+          height: '32px',
+          border: '3px solid rgba(0,0,0,0.1)',
+          borderTopColor: '#000',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite'
+        }}></div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
   return (
     <Router>
       <div className="App">

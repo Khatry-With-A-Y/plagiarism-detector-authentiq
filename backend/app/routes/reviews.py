@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, send_file
 from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification, ReviewerInvite, Institution
 from ..utils.auth import (
     require_auth, require_admin, require_reviewer, get_current_user,
-    generate_token, hash_password
+    generate_access_token, generate_refresh_token, hash_password
 )
 from ..utils.mailer import send_reviewer_invite_email
 from ..utils.serializers import serialize_assignment, serialize_assignment_list
@@ -437,11 +437,12 @@ def consume_invitation():
 
     ReviewerInvite.mark_consumed(invite['id'], user['id'])
     refreshed = User.get_by_id(user['id'])
-    token = generate_token(refreshed['id'], refreshed['username'], refreshed['role'])
+    access_token = generate_access_token(refreshed['id'], refreshed['username'], refreshed['role'])
+    refresh_token = generate_refresh_token(refreshed['id'])
 
-    return jsonify({
+    resp = jsonify({
         'message': 'Invitation consumed',
-        'token': token,
+        'token': access_token,
         'user': {
             'id': refreshed['id'],
             'username': refreshed['username'],
@@ -452,7 +453,18 @@ def consume_invitation():
         'submission_id': invite['submission_id'],
         'review_status': assignment.get('review_status'),
         'assignment_status': (assignment.get('assignment') or {}).get('assignment_status'),
-    }), 200
+    })
+
+    resp.set_cookie(
+        'refresh_token',
+        refresh_token,
+        httponly=True,
+        secure=False,
+        samesite='Lax',
+        max_age=None
+    )
+
+    return resp, 200
 
 
 @reviews_bp.route('/assignments', methods=['GET'])

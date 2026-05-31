@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import Logo from "../components/Logo";
+import useAuth from "../hooks/useAuth";
 import "./landing.css";
 
 const STEPS = [
@@ -211,6 +212,7 @@ function ProcessWidget() {
 }
 
 function Landing() {
+  const { isAuthenticated, isInitializing } = useAuth();
   const [openFAQ, setOpenFAQ] = useState(null);
 
   const toggleFAQ = (index) => {
@@ -223,8 +225,16 @@ function Landing() {
       <nav className="navbar">
         <Logo to="/" />
         <div className="nav-right">
-          <Link to="/login" className="nav-link">Login</Link>
-          <Link to="/register" className="nav-btn">Get Started</Link>
+          {isInitializing ? (
+            <div className="nav-loading-placeholder" style={{ width: '120px', height: '36px', background: 'rgba(0,0,0,0.05)', borderRadius: '6px' }} />
+          ) : isAuthenticated ? (
+            <Link to="/dashboard" className="nav-btn">Dashboard</Link>
+          ) : (
+            <>
+              <Link to="/login" className="nav-link">Login</Link>
+              <Link to="/register" className="nav-btn">Get Started</Link>
+            </>
+          )}
         </div>
       </nav>
 
@@ -241,7 +251,13 @@ function Landing() {
               Upload a draft, receive sentence-level plagiarism evidence. Optionally, contribute to our corpus through a voluntary double-blind peer review process.
             </p>
             <div className="hero-actions">
-              <Link to="/register" className="btn-primary">Start My First Check</Link>
+              {isInitializing ? (
+                <div className="hero-loading-placeholder" style={{ width: '180px', height: '48px', background: 'rgba(0,0,0,0.05)', borderRadius: '8px' }} />
+              ) : isAuthenticated ? (
+                <Link to="/dashboard" className="btn-primary">Go to Dashboard</Link>
+              ) : (
+                <Link to="/register" className="btn-primary">Start My First Check</Link>
+              )}
               <a href="#faq" className="btn-ghost">View FAQs</a>
             </div>
           </div>
@@ -358,7 +374,13 @@ function Landing() {
             evidence and human review?
           </h2>
           <div className="cta-actions">
-            <Link to="/register" className="btn-primary btn-primary--cta">Create Free Account</Link>
+            {isInitializing ? (
+              <div className="cta-loading-placeholder" style={{ width: '200px', height: '52px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }} />
+            ) : isAuthenticated ? (
+              <Link to="/dashboard" className="btn-primary btn-primary--cta">Back to Dashboard</Link>
+            ) : (
+              <Link to="/register" className="btn-primary btn-primary--cta">Create Free Account</Link>
+            )}
             <a href="#how-it-works" className="btn-outline-light">See How Peer Review Works</a>
           </div>
           <div className="cta-trust">
