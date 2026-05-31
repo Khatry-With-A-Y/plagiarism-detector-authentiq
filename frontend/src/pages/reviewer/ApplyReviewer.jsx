@@ -92,6 +92,19 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
   const [savingEmail, setSavingEmail] = useState(false);
   const [editEmailError, setEditEmailError] = useState(null);
 
+  const getApplicationDisplayStatus = (app) => {
+    if (!app) return 'none';
+    if (app.revoked_at) return 'revoked';
+    return app.application_status;
+  };
+
+  const getApplicationReason = (app) => {
+    const status = getApplicationDisplayStatus(app);
+    if (status === 'revoked') return app?.revoke_reason || app?.decision_reason || 'No reason provided.';
+    if (status === 'rejected') return app?.decision_reason || 'No reason provided.';
+    return 'No reason provided.';
+  };
+
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -105,7 +118,7 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
         setMyApp(myAppData);
         
         if (myAppData && myAppData.application_status !== 'none') {
-            if (myAppData.application_status === 'pending' || myAppData.application_status === 'approved' || myAppData.application_status === 'rejected') {
+            if (myAppData.application_status === 'pending' || myAppData.application_status === 'approved' || myAppData.application_status === 'rejected' || myAppData.revoked_at) {
                 onSubmitted();
             }
             setFormData({
@@ -483,6 +496,17 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
           Pending admin review
         </span>
       );
+    } else if (getApplicationDisplayStatus(myApp) === 'revoked') {
+      statusChip = (
+        <span className="apply-status-chip danger">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="15" y1="9" x2="9" y2="15"></line>
+            <line x1="9" y1="9" x2="15" y2="15"></line>
+          </svg>
+          Application Revoked
+        </span>
+      );
     } else if (myApp?.application_status === 'rejected') {
       statusChip = (
         <span className="apply-status-chip danger">
@@ -491,7 +515,7 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
             <line x1="15" y1="9" x2="9" y2="15"></line>
             <line x1="9" y1="9" x2="15" y2="15"></line>
           </svg>
-          Application rejected
+          Application Rejected
         </span>
       );
     } else if (!myApp || myApp.application_status === 'none') {
@@ -569,7 +593,26 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
           </div>
         )}
 
-        {myApp?.application_status === 'rejected' && (
+        {getApplicationDisplayStatus(myApp) === 'revoked' && (
+          <div className="apply-card danger">
+            <h3 className="apply-card-title danger">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="15" y1="9" x2="9" y2="15"></line>
+                <line x1="9" y1="9" x2="15" y2="15"></line>
+              </svg>
+              Application Revoked
+            </h3>
+            <p className="apply-card-body">
+              <strong>Reason:</strong> {myApp.revoke_reason || myApp.decision_reason || 'No reason provided.'}
+            </p>
+            <p className="apply-card-body" style={{ color: '#64748b', fontSize: '13px' }}>
+              Your reviewer access was revoked. You can update your details and re-apply below.
+            </p>
+          </div>
+        )}
+
+        {getApplicationDisplayStatus(myApp) === 'rejected' && (
           <div className="apply-card danger">
             <h3 className="apply-card-title danger">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -580,7 +623,7 @@ function ApplyReviewer({ isEmbedded = false, onSubmitted = () => {}, onCancel = 
               Application Rejected
             </h3>
             <p className="apply-card-body">
-              <strong>Reason:</strong> {myApp.decision_reason || 'No reason provided.'}
+              <strong>Reason:</strong> {getApplicationReason(myApp)}
             </p>
             <p className="apply-card-body" style={{ color: '#64748b', fontSize: '13px' }}>
               You can update your details and re-apply below.

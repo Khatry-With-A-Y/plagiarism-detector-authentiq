@@ -21,6 +21,12 @@ function ReviewerApplications() {
   const [revokeModal, setRevokeModal] = useState({ show: false, app: null, reason: '' });
   const [revokeError, setRevokeError] = useState(null);
 
+  const getApplicationDisplayStatus = (app) => {
+    if (!app) return 'none';
+    if (app.revoked_at) return 'revoked';
+    return app.application_status;
+  };
+
   useEffect(() => {
     fetchApplications();
   }, [filter, page]);
@@ -379,9 +385,13 @@ function ReviewerApplications() {
                       {bioModal.app.application_status !== 'pending' && (
                           <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
                               <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>Current Decision</label>
-                              <p style={{ marginTop: '8px' }}><strong>Status:</strong> {bioModal.app.application_status.toUpperCase()}</p>
+                              <p style={{ marginTop: '8px' }}><strong>Status:</strong> {getApplicationDisplayStatus(bioModal.app).toUpperCase()}</p>
                               {bioModal.app.reviewed_at && <p><strong>Decided On:</strong> {new Date(bioModal.app.reviewed_at).toLocaleString()}</p>}
-                              {bioModal.app.decision_reason && <p style={{ marginTop: '8px' }}><strong>Reason:</strong> {bioModal.app.decision_reason}</p>}
+                              {(getApplicationDisplayStatus(bioModal.app) === 'revoked' ? bioModal.app.revoke_reason : bioModal.app.decision_reason) && (
+                                <p style={{ marginTop: '8px' }}>
+                                  <strong>Reason:</strong> {getApplicationDisplayStatus(bioModal.app) === 'revoked' ? bioModal.app.revoke_reason : bioModal.app.decision_reason}
+                                </p>
+                              )}
                           </div>
                       )}
 
