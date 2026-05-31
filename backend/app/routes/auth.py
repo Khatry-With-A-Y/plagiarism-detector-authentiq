@@ -320,7 +320,11 @@ def get_all_users():
 @auth_bp.route('/users/<int:user_id>/toggle-status', methods=['PUT'])
 @require_admin
 def toggle_user_status(user_id):
-    """Toggle a user's active/blocked status"""
+    """Toggle a user's blocked/active status.
+
+    Paused reviewers also block through this route so the admin modal can
+    reuse one confirmation flow for both active and paused accounts.
+    """
     user = User.get_by_id(user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
@@ -328,7 +332,7 @@ def toggle_user_status(user_id):
     if user['role'] == 'admin':
         return jsonify({'error': 'Cannot modify admin status'}), 403
         
-    new_status = 'blocked' if user.get('status', 'active') == 'active' else 'active'
+    new_status = 'active' if user.get('status', 'active') == 'blocked' else 'blocked'
     
     conn = get_db_connection()
     cursor = conn.cursor()

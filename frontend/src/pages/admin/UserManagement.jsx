@@ -11,13 +11,13 @@ import './userManagement.css';
 
 /**
  * Decline-handling Step 6: User Management now also surfaces the per-reviewer
- * decline / expiry / vote counters and the pause / unpause / waive levers
+ * decline / expiry / vote counters and the pause / unpause / block / unblock / waive levers
  * that previously lived on a separate "Reviewer Behaviour" admin tab.
  *
  * The table stays compact (identity + role + status + actions), while
  * activity and reviewer-behaviour counters are surfaced in the modal —
  * institution row, full metric grid, recent decline events with Waive,
- * Pause / Unpause buttons — is exposed behind the existing "View Details"
+ * Pause / Unpause and Block / Unblock buttons — is exposed behind the existing "View Details"
  * action button so the table stays compact.
  *
  * See .junie/plans/decline-handling-implementation.md § Step 6.
@@ -43,10 +43,12 @@ function UserManagement({ isEmbedded = false }) {
   // Per-user Details modal state.
   const [detailsUser, setDetailsUser] = useState(null);
   const [detailsBusy, setDetailsBusy] = useState(false);
+  const [detailsAction, setDetailsAction] = useState(null);
   const [detailsError, setDetailsError] = useState(null);
   const [declineEvents, setDeclineEvents] = useState({ loading: false, events: [], error: null });
   const [pausePrompt, setPausePrompt] = useState({ open: false, reason: '' });
   const [unpausePromptOpen, setUnpausePromptOpen] = useState(false);
+  const [blockPromptOpen, setBlockPromptOpen] = useState(false);
 
   const navigate = useNavigate();
 
@@ -134,22 +136,6 @@ function UserManagement({ isEmbedded = false }) {
     }
   };
 
-  const handleToggleStatus = async (userId, currentRole, currentStatus) => {
-    if (currentRole === 'admin') return; // Cannot modify admin
-    // Paused reviewers are NOT flipped by the active/blocked toggle —
-    // admin must Unpause from the Details modal first. This guard keeps
-    // the toggle's two-state visual contract intact.
-    if (currentStatus === 'paused') return;
-    try {
-      const response = await adminAPI.toggleUserStatus(userId);
-      const newStatus = response.data.status;
-      setUsersList(prev => prev.map(u => u.id === userId ? { ...u, status: newStatus } : u));
-    } catch (error) {
-      console.error('Failed to toggle user status:', error);
-      alert('Failed to update user status');
-    }
-  };
-
   // ---------------------------------------------------------------------
   // Reviewer-behaviour helpers (Step 6 — merged from ReviewerBehaviour.jsx)
   // ---------------------------------------------------------------------
@@ -187,9 +173,11 @@ function UserManagement({ isEmbedded = false }) {
   const closeDetails = () => {
     setDetailsUser(null);
     setDetailsError(null);
+    setDetailsAction(null);
     setDeclineEvents({ loading: false, events: [], error: null });
     setPausePrompt({ open: false, reason: '' });
     setUnpausePromptOpen(false);
+    setBlockPromptOpen(false);
   };
 
   // After any pause / unpause / waive, refresh both the table data and the
@@ -216,6 +204,7 @@ function UserManagement({ isEmbedded = false }) {
 
   const handleConfirmPause = async () => {
     if (!detailsUser) return;
+    setDetailsAction('pause');
     setDetailsBusy(true);
     setDetailsError(null);
     try {
@@ -230,6 +219,7 @@ function UserManagement({ isEmbedded = false }) {
     } catch (err) {
       setDetailsError(err?.response?.data?.error || 'Pause failed.');
     } finally {
+      setDetailsAction(null);
       setDetailsBusy(false);
     }
   };
@@ -246,16 +236,48 @@ function UserManagement({ isEmbedded = false }) {
 
   const handleConfirmUnpause = async () => {
     if (!detailsUser) return;
+    const wasBlocked = detailsUser.status === 'blocked';
+    setDetailsAction('unpause');
     setDetailsBusy(true);
     setDetailsError(null);
     try {
       await reviewersAPI.adminUnpauseReviewer(detailsUser.id);
       await refreshAfterMutation(detailsUser.id);
-      setDetailsUser((prev) => (prev ? { ...prev, status: 'active' } : prev));
+      setDetailsUser((prev) => (prev ? { ...prev, status: wasBlocked ? 'blocked' : 'active' } : prev));
       setUnpausePromptOpen(false);
     } catch (err) {
       setDetailsError(err?.response?.data?.error || 'Unpause failed.');
     } finally {
+      setDetailsAction(null);
+      setDetailsBusy(false);
+    }
+  };
+
+  const handleRequestBlock = () => {
+    if (!detailsUser || detailsBusy) return;
+    setBlockPromptOpen(true);
+  };
+
+  const handleCancelBlock = () => {
+    if (detailsBusy) return;
+    setBlockPromptOpen(false);
+  };
+
+  const handleConfirmBlock = async () => {
+    if (!detailsUser) return;
+    setDetailsAction('block');
+    setDetailsBusy(true);
+    setDetailsError(null);
+    try {
+      const response = await adminAPI.toggleUserStatus(detailsUser.id);
+      const newStatus = response?.data?.status || (detailsUser.status === 'blocked' ? 'active' : 'blocked');
+      setBlockPromptOpen(false);
+      await refreshAfterMutation(detailsUser.id);
+      setDetailsUser((prev) => (prev ? { ...prev, status: newStatus } : prev));
+    } catch (err) {
+      setDetailsError(err?.response?.data?.error || 'Status change failed.');
+    } finally {
+      setDetailsAction(null);
       setDetailsBusy(false);
     }
   };
@@ -284,10 +306,22 @@ function UserManagement({ isEmbedded = false }) {
   // the CSS class (usermgmt-status-pill <kind>). Reviewers get a third
   // "paused" pill plus an optional amber "near-limit" indicator surfaced
   // alongside it in the cell.
-  const statusInfo = (userItem) => {
-    if (userItem.status === 'paused') return { label: 'Paused', kind: 'paused' };
-    if (userItem.status === 'blocked') return { label: 'Blocked', kind: 'blocked' };
-    return { label: 'Active', kind: 'active' };
+  const statusInfo = (userItem, behaviour = null) => {
+    const badges = [];
+    const isReviewerPaused = userItem.role === 'reviewer' && (
+      userItem.status === 'paused' || Boolean(behaviour && behaviour.paused_at)
+    );
+
+    if (userItem.status === 'blocked') {
+      badges.push({ label: 'Blocked', kind: 'blocked' });
+    }
+    if (isReviewerPaused) {
+      badges.push({ label: 'Paused', kind: 'paused' });
+    }
+    if (badges.length === 0) {
+      badges.push({ label: 'Active', kind: 'active' });
+    }
+    return badges;
   };
 
   return (
@@ -444,8 +478,8 @@ function UserManagement({ isEmbedded = false }) {
                   const behaviour = behaviourByUserId[userItem.id] || null;
                   const isReviewer = userItem.role === 'reviewer';
                   const countable = behaviour?.countable_declines ?? 0;
-                  const nearLimit = isReviewer && countable >= softLimit && countable < hardLimit;
-                  const pill = statusInfo(userItem);
+                  const statusBadges = statusInfo(userItem, behaviour);
+                  const showNearLimit = isReviewer && statusBadges.length === 1 && statusBadges[0].kind === 'active' && countable >= softLimit && countable < hardLimit;
                   return (
                     <tr key={userItem.id}>
                       <td>
@@ -479,28 +513,18 @@ function UserManagement({ isEmbedded = false }) {
                         <span className="usermgmt-date">{formatDate(userItem.created_at)}</span>
                       </td>
                       <td>
-                        {/* Status cell:
-                            - admins: read-only "Active" pill
-                            - paused reviewers: red "Paused" pill (toggle disabled)
-                            - everyone else: pill + active/blocked toggle
-                            - near-limit reviewers also get a small amber tag
-                        */}
                         <div className="usermgmt-status-cell">
-                          <span className={`usermgmt-status-pill ${pill.kind}`}>{pill.label}</span>
-                          {nearLimit && pill.kind === 'active' && (
+                          <div className="usermgmt-status-badges">
+                            {statusBadges.map((pill) => (
+                              <span key={pill.kind} className={`usermgmt-status-pill ${pill.kind}`}>
+                                {pill.label}
+                              </span>
+                            ))}
+                          </div>
+                          {showNearLimit && (
                             <span className="usermgmt-near-limit" title={`Soft warning at ${softLimit} countable declines`}>
                               Near Limit
                             </span>
-                          )}
-                          {userItem.role !== 'admin' && userItem.status !== 'paused' && (
-                            <div
-                              className="usermgmt-toggle-wrapper"
-                              onClick={() => handleToggleStatus(userItem.id, userItem.role, userItem.status)}
-                              style={{ cursor: 'pointer' }}
-                              title={userItem.status === 'active' ? 'Click to block' : 'Click to unblock'}
-                            >
-                              <div className={`usermgmt-toggle ${userItem.status === 'active' ? 'active' : ''}`}></div>
-                            </div>
                           )}
                         </div>
                       </td>
@@ -556,8 +580,10 @@ function UserManagement({ isEmbedded = false }) {
           const b = behaviourByUserId[u.id] || null;
           const isReviewer = u.role === 'reviewer';
           const countable = b?.countable_declines ?? 0;
-          const pill = statusInfo(u);
-          const nearLimit = isReviewer && countable >= softLimit && countable < hardLimit;
+          const statusBadges = statusInfo(u, b);
+          const showNearLimit = isReviewer && statusBadges.length === 1 && statusBadges[0].kind === 'active' && countable >= softLimit && countable < hardLimit;
+          const isBlocked = u.status === 'blocked';
+          const isPaused = Boolean(b && b.paused_at);
           return (
             <div className="dashboard-modal-overlay" onClick={closeDetails}>
               <div
@@ -579,9 +605,11 @@ function UserManagement({ isEmbedded = false }) {
                     </div>
                     <div className="usermgmt-details-field">
                       <span className="usermgmt-details-label">Status</span>
-                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                        <span className={`usermgmt-status-pill ${pill.kind}`}>{pill.label}</span>
-                        {nearLimit && (
+                      <span className="usermgmt-status-badges">
+                        {statusBadges.map((pill) => (
+                          <span key={pill.kind} className={`usermgmt-status-pill ${pill.kind}`}>{pill.label}</span>
+                        ))}
+                        {showNearLimit && (
                           <span className="usermgmt-near-limit">Near Limit</span>
                         )}
                       </span>
@@ -597,7 +625,7 @@ function UserManagement({ isEmbedded = false }) {
                   </div>
 
                   {/* Paused-state banner with auto-unpause anchor. */}
-                  {u.status === 'paused' && b && (
+                  {b && b.paused_at && (
                     <div className="usermgmt-paused-banner">
                       <strong>Paused.</strong>{' '}
                       {b.paused_reason && (
@@ -753,14 +781,52 @@ function UserManagement({ isEmbedded = false }) {
                   >
                     Close
                   </button>
-                  {isReviewer && u.status === 'paused' && (
+                  {u.role !== 'admin' && (
                     <div className="usermgmt-inline-confirm">
                       <button
+                        className={`dashboard-modal-btn ${u.status === 'blocked' ? 'dashboard-modal-btn-success' : 'dashboard-modal-btn-danger'}`}
+                        onClick={handleRequestBlock}
+                        disabled={detailsBusy}
+                      >
+                        {detailsAction === 'block'
+                          ? (u.status === 'blocked' ? 'Unblocking…' : 'Blocking…')
+                          : (u.status === 'blocked' ? 'Unblock User' : 'Block User')}
+                      </button>
+                      {blockPromptOpen && (
+                        <div className="usermgmt-inline-confirm-actions">
+                          <span className="usermgmt-inline-confirm-label">Confirm?</span>
+                          <button
+                            type="button"
+                            className="usermgmt-inline-icon-btn yes"
+                            onClick={handleConfirmBlock}
+                            disabled={detailsBusy}
+                            title={u.status === 'blocked' ? `Yes, unblock ${u.username}` : `Yes, block ${u.username}`}
+                            aria-label={u.status === 'blocked' ? `Yes, unblock ${u.username}` : `Yes, block ${u.username}`}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            type="button"
+                            className="usermgmt-inline-icon-btn no"
+                            onClick={handleCancelBlock}
+                            disabled={detailsBusy}
+                            title={u.status === 'blocked' ? 'No, keep user blocked' : 'No, keep user active'}
+                            aria-label={u.status === 'blocked' ? 'No, keep user blocked' : 'No, keep user active'}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {isReviewer && isPaused && (
+                  <div className="usermgmt-inline-confirm">
+                    <button
                         className="dashboard-modal-btn dashboard-modal-btn-success"
                         onClick={handleRequestUnpause}
                         disabled={detailsBusy}
                       >
-                        {detailsBusy ? 'Unpausing…' : 'Unpause Reviewer'}
+                      {detailsAction === 'unpause' ? 'Unpausing…' : 'Unpause Reviewer'}
                       </button>
                       {unpausePromptOpen && (
                         <div className="usermgmt-inline-confirm-actions">
@@ -789,7 +855,7 @@ function UserManagement({ isEmbedded = false }) {
                       )}
                     </div>
                   )}
-                  {isReviewer && u.status !== 'paused' && !pausePrompt.open && (
+                  {isReviewer && !isBlocked && !isPaused && !pausePrompt.open && (
                     <button
                       className="dashboard-modal-btn dashboard-modal-btn-reject"
                       onClick={() => setPausePrompt({ open: true, reason: '' })}
@@ -798,7 +864,7 @@ function UserManagement({ isEmbedded = false }) {
                       Pause Reviewer
                     </button>
                   )}
-                  {isReviewer && u.status !== 'paused' && pausePrompt.open && (
+                  {isReviewer && !isBlocked && !isPaused && pausePrompt.open && (
                     <>
                       <button
                         className="dashboard-modal-btn dashboard-modal-btn-secondary"
@@ -812,7 +878,7 @@ function UserManagement({ isEmbedded = false }) {
                         onClick={handleConfirmPause}
                         disabled={detailsBusy}
                       >
-                        {detailsBusy ? 'Pausing…' : 'Confirm Pause'}
+                        {detailsAction === 'pause' ? 'Pausing…' : 'Confirm Pause'}
                       </button>
                     </>
                   )}

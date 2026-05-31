@@ -514,12 +514,19 @@
   color: #6b7280;
 }
 
-/* --- Status cell (pill + optional toggle + near-limit chip) ----------- */
+/* --- Status cell (read-only pill(s) + near-limit chip) ---------------- */
 
 .usermgmt-status-cell {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.usermgmt-status-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -611,6 +618,7 @@
   margin: 20px 0 8px;
   font-size: 14px;
   font-weight: 600;
+  font-family: var(--font-body);
   color: #111827;
 }
 
