@@ -24,6 +24,51 @@ const getMatchClassification = (similarity) => {
   return { label: 'Possible Paraphrase', color: 'var(--green-600)' };
 };
 
+const truncateText = (value, maxLength = 60) => {
+  const text = `${value ?? ''}`.trim();
+  if (!text) return '--';
+  return text.length > maxLength ? `${text.slice(0, maxLength).trimEnd()}…` : text;
+};
+
+const toAuthorList = (authorValue) => {
+  if (Array.isArray(authorValue)) {
+    return authorValue
+      .map((author) => (typeof author === 'string' ? author : author?.name))
+      .map((author) => `${author ?? ''}`.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof authorValue !== 'string') return [];
+
+  const raw = authorValue.trim();
+  if (!raw) return [];
+
+  if (raw.startsWith('[') && raw.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((author) => (typeof author === 'string' ? author : author?.name))
+          .map((author) => `${author ?? ''}`.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Fallback to delimiter parsing below.
+    }
+  }
+
+  return raw
+    .split(/\s*(?:,|;|\band\b|&)\s*/i)
+    .map((author) => author.trim())
+    .filter(Boolean);
+};
+
+const getCollapsedAuthorPreview = (authorList, fallbackText) => {
+  if (!authorList.length) return truncateText(fallbackText, 32);
+  if (authorList.length === 1) return truncateText(authorList[0], 32);
+  return `${truncateText(authorList[0], 24)} +${authorList.length - 1} more`;
+};
+
 export default function SimilarityMatchesReport({
   results = [],
   submissionText = '',
@@ -101,6 +146,14 @@ export default function SimilarityMatchesReport({
               const isExpanded = expandedSource === rowKey;
               const hasMatchDetails = result.match_details && result.match_details.matches && result.match_details.matches.length > 0;
               const sourceTitle = result.title || result.filename || `Source #${index + 1}`;
+              const shouldShowFullMetadata = isExpanded || !hasMatchDetails;
+              const authorList = toAuthorList(result.authors ?? result.author);
+              const rawAuthorText = typeof result.author === 'string' ? result.author.trim() : '';
+              const fullAuthorText = authorList.length ? authorList.join(', ') : (rawAuthorText || '--');
+              const titleText = shouldShowFullMetadata ? sourceTitle : truncateText(sourceTitle, 64);
+              const authorText = shouldShowFullMetadata
+                ? fullAuthorText
+                : getCollapsedAuthorPreview(authorList, fullAuthorText);
 
               return (
                 <React.Fragment key={rowKey}>
@@ -118,14 +171,24 @@ export default function SimilarityMatchesReport({
                           </svg>
                         </div>
                         <div className="dashboard-doc-info">
-                          <span className="dashboard-doc-name">{sourceTitle}</span>
-                          {result.filename && (
-                            <span style={{ fontSize: '12px', color: '#94a3b8' }}>{result.filename}</span>
-                          )}
+                          <span
+                            className="dashboard-doc-name"
+                            style={shouldShowFullMetadata
+                              ? {
+                                whiteSpace: 'normal',
+                                overflow: 'visible',
+                                textOverflow: 'clip',
+                              }
+                              : undefined}
+                          >
+                            {titleText}
+                          </span>
                         </div>
                       </div>
                     </td>
-                    <td>{result.author || '--'}</td>
+                    <td style={shouldShowFullMetadata ? { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip' } : undefined}>
+                      {authorText}
+                    </td>
                     <td>
                       <span className={`dashboard-similarity ${riskLevel}`}>
                         {similarity.toFixed(1)}%

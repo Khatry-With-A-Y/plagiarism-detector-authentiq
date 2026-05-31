@@ -2274,6 +2274,7 @@
   position: sticky;
   top: 0;
   z-index: 1;
+  font-family: var(--font-body);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2284,12 +2285,24 @@
   border-radius: 16px 16px 0 0;
 }
 
+.review-action-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .review-action-modal-header h3 {
   margin: 0;
+  font-family: var(--font-body);
   font-size: 17px;
   font-weight: 700;
   color: #111827;
   letter-spacing: -0.01em;
+}
+
+.review-action-modal-status-badge {
+  flex-shrink: 0;
 }
 
 .review-action-modal-close {
@@ -2316,6 +2329,7 @@
 
 .review-action-modal-body {
   padding: 20px 24px 24px;
+  font-family: var(--font-body);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -2758,23 +2772,20 @@
 .review-action-card-voted {
   border-left: none;
   background: #ffffff;
-  border: 1px solid #e5e7eb !important;
-}
-
-/* Typography & spacing for action cards */
-.review-action-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 6px;
-  letter-spacing: -0.01em;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .review-action-text {
-  font-size: 13px;
-  color: #6b7280;
+  font-size: 14px;
+  color: #334155;
   margin-bottom: 12px;
   line-height: 1.6;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
 }
 
 .review-action-text-muted {

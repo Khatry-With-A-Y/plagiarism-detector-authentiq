@@ -138,6 +138,13 @@ function Results({ id: propId, isEmbedded }) {
     }
   };
   const summaryStyle = getSummaryStyle(overallRisk);
+  const reportDetailHeadingStyle = {
+    fontSize: '1.5rem',
+    fontWeight: 600,
+    color: '#1e293b',
+    fontFamily: 'Inter, var(--font-body), sans-serif',
+    lineHeight: '1.2',
+  };
 
   if (loading) {
     return (
@@ -173,7 +180,8 @@ function Results({ id: propId, isEmbedded }) {
       )}
 
       {/* Main Content */}
-      <main className={isEmbedded ? "" : "dashboard-main"} style={isEmbedded ? { padding: 0 } : {}}>
+      <main style={isEmbedded ? { flex: 1, width: '100%', boxSizing: 'border-box', padding: '24px 2rem' } : { flex: 1, maxWidth: '1200px', margin: '0 auto', padding: '24px 2rem', width: '100%', boxSizing: 'border-box' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
         {/* Back Button - hide if embedded */}
         {!isEmbedded && (
         <button
@@ -182,13 +190,13 @@ function Results({ id: propId, isEmbedded }) {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '10px 16px',
+            padding: '8px 16px',
             background: 'none',
             border: 'none',
             color: '#64748b',
             fontSize: '14px',
             cursor: 'pointer',
-            marginBottom: '24px'
+            marginBottom: '16px'
           }}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -214,7 +222,7 @@ function Results({ id: propId, isEmbedded }) {
         ) : (
           <>
             {/* Document Info Header */}
-            <div className="dashboard-reports" style={{ marginBottom: '24px' }}>
+            <div className="dashboard-reports" style={{ marginBottom: '16px', padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
@@ -259,47 +267,55 @@ function Results({ id: propId, isEmbedded }) {
             </div>
 
             {/* Analysis Summary */}
-            <div className="dashboard-tip-card" style={{ marginBottom: '24px', marginLeft: '24px', marginRight: '24px', borderLeft: `4px solid ${summaryStyle.color}` }}>
-              <div className="dashboard-tip-header">
-                <div className="dashboard-tip-icon" style={{ backgroundColor: summaryStyle.bg, color: summaryStyle.color, width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%' }}>
+            <div style={{
+              marginBottom: '16px',
+              padding: '1rem 1.25rem',
+              backgroundColor: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderLeft: `4px solid ${summaryStyle.color}`,
+              borderRadius: '8px',
+              boxShadow: '0 1px 3px rgba(14, 42, 69, 0.04)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                <div style={{ backgroundColor: summaryStyle.bg, color: summaryStyle.color, width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', flexShrink: 0 }}>
                   {summaryStyle.icon === 'success' ? (
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                       <polyline points="22 4 12 14.01 9 11.01"></polyline>
                     </svg>
                   ) : summaryStyle.icon === 'warning' ? (
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
                       <line x1="12" y1="9" x2="12" y2="13"></line>
                       <line x1="12" y1="17" x2="12.01" y2="17"></line>
                     </svg>
                   ) : (
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10"></circle>
                       <line x1="12" y1="8" x2="12" y2="12"></line>
                       <line x1="12" y1="16" x2="12.01" y2="16"></line>
                     </svg>
                   )}
                 </div>
-                <h3 style={{ margin: 0, color: '#1a1a2e', fontSize: '18px', fontFamily: 'var(--font-body)' }}>Analysis Summary</h3>
+                <span style={reportDetailHeadingStyle}>Analysis Summary</span>
               </div>
-              <div className="dashboard-tip-content" style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ fontSize: '14px', color: '#334155', lineHeight: '1.6' }}>
                 {results.length === 0 ? (
-                  <div style={{ color: '#1e293b' }}>
+                  <p style={{ margin: 0 }}>
                     No similarity matches were found in our database. Your document appears to be completely original!
-                  </div>
+                  </p>
                 ) : (
                   <>
-                    <div>
+                    <p style={{ margin: '0 0 8px' }}>
                       <strong style={{ color: '#1e293b' }}>Findings:</strong> This document has an overall similarity of <strong>{maxSimilarityPercent.toFixed(1)}%</strong> across <strong>{submission.documents_compared || results.length}</strong> sources. The highest exact sentence match detected is <strong>{overallHighestMatchPercent.toFixed(1)}%</strong>.
-                    </div>
-                    <div>
+                    </p>
+                    <p style={{ margin: 0 }}>
                       <strong style={{ color: '#1e293b' }}>Recommendation:</strong> {overallRisk === 'low'
                         ? "Your document shows minimal similarity with sources in our database. This indicates strong originality."
                         : overallRisk === 'medium'
                         ? "Your document has some similarity with existing sources. Review the matched sections and ensure proper citations are in place."
                         : "Some sections of your document closely match existing sources. Please review the highlighted parts and add proper citations or rewrite them in your own words."}
-                    </div>
+                    </p>
                   </>
                 )}
               </div>
@@ -307,32 +323,37 @@ function Results({ id: propId, isEmbedded }) {
 
             {/* Peer Review Section */}
             {submission.status === 'completed' && (
-              <div className="dashboard-reports" style={{ marginBottom: '24px', padding: '24px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+              <div className="dashboard-reports" style={{ marginBottom: '16px', padding: '1rem 1.25rem', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 1px 3px rgba(14, 42, 69, 0.04)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '8px', fontFamily: 'var(--font-body)' }}>Peer Review & Corpus Inclusion</h3>
-                    {submission.review_status ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className={`dashboard-risk-badge ${
-                          submission.review_status === 'approved' ? 'low' : 
-                          submission.review_status === 'rejected' ? 'critical' : 'pending'
-                        }`}>
-                          {submission.review_status.charAt(0).toUpperCase() + submission.review_status.slice(1).replace('_', ' ')}
-                        </span>
-                        <span style={{ fontSize: '14px', color: '#64748b' }}>
-                          Requested on {new Date(submission.review_requested_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                    ) : eligibilityLoading ? (
-                      <p style={{ fontSize: '14px', color: '#64748b' }}>Checking eligibility for peer review...</p>
-                    ) : isEligible ? (
-                      <p style={{ fontSize: '14px', color: '#64748b', maxWidth: '600px' }}>
-                        This submission meets the eligibility criteria for peer review. You can request trusted reviewers to verify its originality and include it in our verified academic corpus.
-                      </p>
-                    ) : (
-                      <p style={{ fontSize: '14px', color: '#dc2626' }}>
-                        This submission is not eligible for peer review. The similarity score or sentence match exceeds the 20% threshold.
-                      </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <h3 style={{ ...reportDetailHeadingStyle, margin: 0 }}>Peer Review & Corpus Inclusion</h3>
+                      {submission.review_status && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className={`dashboard-risk-badge ${
+                            submission.review_status === 'approved' ? 'low' : 
+                            submission.review_status === 'rejected' ? 'critical' : 'pending'
+                          }`} style={{ padding: '2px 10px', fontSize: '12px' }}>
+                            {submission.review_status.charAt(0).toUpperCase() + submission.review_status.slice(1).replace('_', ' ')}
+                          </span>
+                          <span style={{ fontSize: '13px', color: '#64748b' }}>
+                            Requested on {new Date(submission.review_requested_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {!submission.review_status && (
+                      eligibilityLoading ? (
+                        <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Checking eligibility for peer review...</p>
+                      ) : isEligible ? (
+                        <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '600px', margin: 0 }}>
+                          This submission meets the eligibility criteria for peer review and corpus inclusion.
+                        </p>
+                      ) : (
+                        <p style={{ fontSize: '13px', color: '#dc2626', margin: 0 }}>
+                          This submission is not eligible for peer review. Similarity score exceeds threshold.
+                        </p>
+                      )
                     )}
                   </div>
                   
@@ -341,17 +362,17 @@ function Results({ id: propId, isEmbedded }) {
                       className="dashboard-btn-primary" 
                       onClick={handleOpenConfirmModal}
                       disabled={requestLoading || requestSuccess}
-                      style={{ padding: '12px 24px' }}
+                      style={{ padding: '8px 16px', fontSize: '14px' }}
                     >
                       {requestLoading ? "Submitting..." : requestSuccess ? "Request Submitted" : "Request Peer Review"}
                     </button>
                   )}
                 </div>
                 {requestError && (
-                  <p style={{ color: '#dc2626', fontSize: '12px', marginTop: '12px' }}>{requestError}</p>
+                  <p style={{ color: '#dc2626', fontSize: '12px', marginTop: '8px' }}>{requestError}</p>
                 )}
                 {requestSuccess && (
-                  <p style={{ color: '#16a34a', fontSize: '14px', marginTop: '12px', fontWeight: '500' }}>
+                  <p style={{ color: '#16a34a', fontSize: '13px', marginTop: '8px', fontWeight: '500' }}>
                     Your request has been submitted. It will be assigned to a panel of expert reviewers shortly.
                   </p>
                 )}
@@ -362,84 +383,105 @@ function Results({ id: propId, isEmbedded }) {
                 pseudonymous Reviewer 1..N labels; never exposes identity. */}
             {panelData && (panelData.admin_decision || panelData.panel?.length > 0) && (
               <div className="dashboard-reports" style={{
-                marginBottom: '24px',
-                padding: '24px',
-                backgroundColor: '#f8fafc',
+                marginBottom: '16px',
+                padding: '1rem 1.25rem',
+                backgroundColor: '#ffffff',
                 border: '1px solid #e2e8f0',
-                borderRadius: '12px',
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(14, 42, 69, 0.04)',
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#1e293b' }}>
-                    Reviewer Panel Feedback
-                  </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                  <div>
+                    <h3 style={{ fontSize: '16px', fontWeight: 500, color: '#1e293b', fontFamily: 'var(--font-body)', margin: 0 }}>
+                      Reviewer Panel Feedback
+                    </h3>
+                    {panelData.panel && panelData.panel.length > 0 && (
+                      <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0' }}>
+                        {panelData.pass_votes} pass · {panelData.fail_votes} fail · Anonymous panel
+                      </p>
+                    )}
+                  </div>
                   {panelData.admin_decision && (
                     <span className={`dashboard-risk-badge ${
                       panelData.admin_decision === 'approved' ? 'low' : 'critical'
-                    }`}>
-                      {panelData.admin_decision.charAt(0).toUpperCase() + panelData.admin_decision.slice(1)}
+                    }`} style={{ padding: '2px 10px', fontSize: '12px' }}>
+                      Final Decision: {panelData.admin_decision.charAt(0).toUpperCase() + panelData.admin_decision.slice(1)}
                     </span>
                   )}
                 </div>
 
                 {panelData.admin_decision_reason && (
                   <div style={{
-                    background: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    padding: '12px 14px',
-                    marginBottom: '14px',
-                    fontSize: '13px',
-                    color: '#374151',
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '6px',
+                    padding: '10px 12px',
+                    marginTop: '12px',
+                    marginBottom: '12px',
+                    fontSize: '14px',
+                    color: '#334155',
                   }}>
-                    <strong>Admin note:</strong> {panelData.admin_decision_reason}
+                    <strong style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.025em', display: 'block', marginBottom: '4px' }}>Admin Remark</strong>
+                    {panelData.admin_decision_reason}
                   </div>
                 )}
 
-                {panelData.panel && panelData.panel.length > 0 ? (
-                  <>
-                    <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
-                      Reviewer identities are anonymous. Vote tally:{' '}
-                      <strong>{panelData.pass_votes}</strong> pass · <strong>{panelData.fail_votes}</strong> fail.
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
-                      {panelData.panel.map((p, idx) => (
-                        <div key={idx} style={{
-                          background: '#fff',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          padding: '12px 14px',
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                            <span style={{ fontWeight: 600, fontSize: '13px', color: '#1e293b' }}>
-                              {p.label}
-                            </span>
-                            <span className={`dashboard-risk-badge ${p.vote === 'pass' ? 'low' : 'high'}`} style={{ fontSize: '11px' }}>
-                              {p.vote ? p.vote.toUpperCase() : '—'}
-                            </span>
-                          </div>
-                          {p.comment && (
-                            <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.5, margin: '4px 0 0' }}>
-                              {p.comment}
-                            </p>
-                          )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
+                  {panelData.panel && panelData.panel.length > 0 ? (
+                    panelData.panel.map((p, idx) => (
+                      <div key={idx} style={{
+                        background: '#ffffff',
+                        border: '1px solid #f1f5f9',
+                        borderRadius: '6px',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: '16px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', flex: 1 }}>
+                          <span style={{ fontWeight: 600, fontSize: '14px', color: '#475569', whiteSpace: 'nowrap', minWidth: '90px', marginTop: '2px' }}>
+                            {p.label}
+                          </span>
+                          <p style={{ fontSize: '15px', color: '#1e293b', margin: 0, flex: 1, lineHeight: '1.5' }}>
+                            {p.comment || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No comment provided.</span>}
+                          </p>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                          <span className={`dashboard-risk-badge ${p.vote === 'pass' ? 'low' : 'high'}`} style={{ fontSize: '11px', padding: '2px 8px', minWidth: '54px', justifyContent: 'center', textAlign: 'center', lineHeight: '1.2' }}>
+                            {p.vote ? p.vote.toUpperCase() : '—'}
+                          </span>
                           {p.fail_reasons?.length > 0 && (
-                            <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                              {p.fail_reasons.map(fr => (
-                                <span key={fr} className="dashboard-risk-badge high" style={{ fontSize: '10px' }}>
-                                  {fr.replace(/_/g, ' ')}
-                                </span>
-                              ))}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' }}>
+                              {[...p.fail_reasons]
+                                .sort((a, b) => {
+                                  if (a === 'other') return 1;
+                                  if (b === 'other') return -1;
+
+                                  const order = {
+                                    insufficient_citation: 0,
+                                    suspected_paraphrase: 1,
+                                    low_content_quality: 2,
+                                    out_of_scope: 3,
+                                  };
+                                  return (order[a] ?? 50) - (order[b] ?? 50);
+                                })
+                                .map(fr => (
+                                  <span key={fr} className="dashboard-risk-badge high" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                                    {fr.replace(/_/g, ' ')}
+                                  </span>
+                                ))}
                             </div>
                           )}
                         </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <p style={{ fontSize: '13px', color: '#64748b' }}>
-                    Reviewers have not voted yet. Feedback will appear here once the panel completes.
-                  </p>
-                )}
+                      </div>
+                    ))
+                  ) : (
+                    <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+                      Reviewers have not voted yet. Feedback will appear here once the panel completes.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -452,6 +494,7 @@ function Results({ id: propId, isEmbedded }) {
 
           </>
         )}
+        </div>
       </main>
 
       {/* Peer Review Confirmation Modal */}

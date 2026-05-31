@@ -440,13 +440,6 @@ function ActionPanel(props) {
       {/* Branch: inactive — declined or expired */}
       {branch === 'inactive' && (
         <div className="dashboard-card review-action-card-inactive">
-          <h3 className="review-action-title">
-            Assignment {status === 'declined'
-              ? 'Declined'
-              : status === 'expired'
-                ? 'Expired'
-                : 'Closed by Admin'}
-          </h3>
           <p className="review-action-text-muted">
             {status === 'declined'
               ? 'You declined this assignment. A replacement reviewer has been notified.'
@@ -470,9 +463,6 @@ function ActionPanel(props) {
       {/* Branches: assigned + decline-confirm — share the same outer card */}
       {(branch === 'assigned' || branch === 'decline-confirm') && (
         <div className="dashboard-card review-action-card-assigned">
-          <h3 className="review-action-title">
-            Accept this review assignment
-          </h3>
           <p className="review-action-text">
             You have until <strong>{assignment?.deadline_at ? new Date(assignment.deadline_at).toLocaleString() : '—'}</strong> to
             cast your vote. Please accept the assignment to unlock the voting
@@ -568,15 +558,6 @@ function ActionPanel(props) {
           read-only Completed-tab revisit). */}
       {branch === 'voted' && (
         <div className="dashboard-card review-action-card-voted">
-          <h3 className="review-action-title">
-            Your Submitted Review
-          </h3>
-          <p className="review-action-text">
-            <strong>Vote:</strong>{' '}
-            <span className={`dashboard-risk-badge ${assignment?.vote === 'pass' ? 'low' : 'high'}`}>
-              {assignment?.vote?.toUpperCase() || (voteSuccess ? selectedVote?.toUpperCase() : '—')}
-            </span>
-          </p>
           {assignment?.comment && (
             <p className="review-action-text">
               <strong>Comment:</strong> {assignment.comment}
@@ -654,8 +635,8 @@ function ActionPanel(props) {
               rows={4}
               placeholder={
                 selectedVote === 'fail'
-                  ? 'Explain why this submission fails originality review (required, min 20 characters)…'
-                  : 'Optional comments for the admin…'
+                  ? 'Explain why this submission fails originality review (visible to the author)...'
+                  : 'Share feedback on this submission (visible to the author)...'
               }
               className={`review-comment-textarea${selectedVote === 'fail' && comment.trim().length < 20 && comment.length > 0 ? ' error' : ''}`}
             />
@@ -950,6 +931,7 @@ export default function ReviewDetail() {
       : showVoting
         ? 'Open Voting Panel'
         : 'Open Review Panel';
+  const isSubmittedReview = isReadOnly || alreadyVoted;
 
   const topMatches = assignment?.top_matches || [];
   const hasAnySentencePairs = topMatches.some(m => m.match_details?.matches?.length > 0);
@@ -1035,7 +1017,14 @@ export default function ReviewDetail() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="review-action-modal-header">
-              <h3>{isReadOnly || alreadyVoted ? 'Submitted Review' : 'Cast Your Vote'}</h3>
+              <div className="review-action-modal-title-group">
+                <h3>{isSubmittedReview ? 'Submitted Review' : 'Cast Your Vote'}</h3>
+                {isSubmittedReview && (
+                  <span className={`dashboard-risk-badge ${assignment?.vote === 'pass' ? 'low' : 'high'} review-action-modal-status-badge`}>
+                    {assignment?.vote?.toUpperCase() || (voteSuccess ? selectedVote?.toUpperCase() : '—')}
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 className="review-action-modal-close"
