@@ -516,6 +516,18 @@ def init_database():
     if 'review_requested_at' not in submission_columns:
         cursor.execute("ALTER TABLE submissions ADD COLUMN review_requested_at TIMESTAMP")
         print("Added review_requested_at column to submissions table")
+    if 'processing_started_at' not in submission_columns:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN processing_started_at TIMESTAMP")
+        print("Added processing_started_at column to submissions table")
+    if 'processing_completed_at' not in submission_columns:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN processing_completed_at TIMESTAMP")
+        print("Added processing_completed_at column to submissions table")
+    if 'processing_failed_at' not in submission_columns:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN processing_failed_at TIMESTAMP")
+        print("Added processing_failed_at column to submissions table")
+    if 'processing_error' not in submission_columns:
+        cursor.execute("ALTER TABLE submissions ADD COLUMN processing_error TEXT")
+        print("Added processing_error column to submissions table")
     if 'review_requested_by' not in submission_columns:
         # FK to users.id (normally equals submission.user_id but stored
         # explicitly for clarity / future admin-initiated requests).

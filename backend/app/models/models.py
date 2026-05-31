@@ -371,6 +371,59 @@ class Submission:
         conn.close()
 
     @staticmethod
+    def mark_processing_started(submission_id):
+        """Record when similarity analysis actually starts."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE submissions
+            SET status = 'processing',
+                processing_started_at = CURRENT_TIMESTAMP,
+                processing_completed_at = NULL,
+                processing_failed_at = NULL,
+                processing_error = NULL
+            WHERE id = ?
+        ''', (submission_id,))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def mark_processing_completed(submission_id):
+        """Record when similarity analysis finishes."""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE submissions
+            SET status = 'completed',
+                processing_completed_at = CURRENT_TIMESTAMP,
+                processing_failed_at = NULL,
+                processing_error = NULL
+            WHERE id = ?
+        ''', (submission_id,))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def mark_processing_failed(submission_id, error_message):
+        """Record when similarity analysis fails without changing CHECKed statuses."""
+        message = (str(error_message).strip() if error_message is not None else '')
+        if len(message) > 500:
+            message = message[:500]
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE submissions
+            SET status = 'pending',
+                processing_failed_at = CURRENT_TIMESTAMP,
+                processing_error = ?,
+                processing_completed_at = NULL
+            WHERE id = ?
+        ''', (message, submission_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
     def update_filename(submission_id, filename):
         """Update submission filename"""
         conn = get_db_connection()

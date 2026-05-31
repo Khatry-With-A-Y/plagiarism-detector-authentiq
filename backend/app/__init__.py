@@ -4,6 +4,7 @@ from flask_cors import CORS
 from .. import config
 from ..config import CORS_ORIGINS, UPLOAD_FOLDER, CORPUS_FOLDER, DATA_DIR
 from .utils.database import init_database
+from .utils.text_processing import preload_wordnet
 
 # import blueprints
 from .routes.auth import auth_bp
@@ -31,6 +32,7 @@ def create_app():
     AVATARS_DIR.mkdir(parents=True, exist_ok=True)
 
     init_database()
+    preload_wordnet()
 
     # register blueprints
     app.register_blueprint(auth_bp)

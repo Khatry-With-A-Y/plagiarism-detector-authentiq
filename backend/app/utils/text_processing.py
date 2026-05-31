@@ -54,6 +54,18 @@ def _cached_lemmatize(word):
     return _lemmatizer.lemmatize(word, pos='n')
 
 
+def preload_wordnet():
+    """Eagerly load WordNet so worker threads never trigger lazy loading."""
+    from nltk.corpus import wordnet
+
+    if hasattr(wordnet, "ensure_loaded"):
+        wordnet.ensure_loaded()
+    else:
+        wordnet.synsets("warmup") # passing a dummy word 
+
+    _cached_lemmatize("warmup")
+
+
 class TextProcessor:
     """Handles text cleaning and preprocessing with tokenization, stopword removal, and lemmatization"""
 

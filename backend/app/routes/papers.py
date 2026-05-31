@@ -326,7 +326,7 @@ def process_submission_analysis(submission_id):
     if not submission:
         return
 
-    Submission.update_status(submission_id, 'processing')
+    Submission.mark_processing_started(submission_id)
 
     try:
         # Get cached corpus and IDF (shared across all worker threads)
@@ -334,7 +334,7 @@ def process_submission_analysis(submission_id):
         cached_idf, corpus_vectors = corpus_cache.get_vectors()
 
         if not corpus_vectors:
-            Submission.update_status(submission_id, 'completed')
+            Submission.mark_processing_completed(submission_id)
             return
 
         # OPTIMIZATION: Use main_content (references excluded) for similarity
@@ -386,7 +386,7 @@ def process_submission_analysis(submission_id):
                 except Exception as e:
                     print(f"Warning: Failed to compute sentence matches for paper {result['paper_id']}: {e}")
 
-        Submission.update_status(submission_id, 'completed')
+        Submission.mark_processing_completed(submission_id)
 
         # Keep user overlapping-terms cache fresh after new analysis.
         try:
@@ -395,7 +395,7 @@ def process_submission_analysis(submission_id):
         except Exception as cache_error:
             print(f"Warning: Failed to refresh overlapping terms cache for user {submission['user_id']}: {cache_error}")
     except Exception as e:
-        Submission.update_status(submission_id, 'pending')
+        Submission.mark_processing_failed(submission_id, str(e))
         raise e
 
 
@@ -703,12 +703,21 @@ def get_processing_time():
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT 
-            CAST(strftime('%s', MAX(r.created_at)) AS INTEGER) - CAST(strftime('%s', s.uploaded_at) AS INTEGER) as processing_time
+        SELECT
+            s.id,
+            CASE
+                WHEN s.processing_started_at IS NOT NULL
+                 AND s.processing_completed_at IS NOT NULL
+                THEN CAST(strftime('%s', s.processing_completed_at) AS INTEGER)
+                   - CAST(strftime('%s', s.processing_started_at) AS INTEGER)
+                ELSE CAST(strftime('%s', MAX(r.created_at)) AS INTEGER)
+                   - CAST(strftime('%s', s.uploaded_at) AS INTEGER)
+            END AS processing_time
         FROM submissions s
-        JOIN similarity_results r ON s.id = r.submission_id
+        LEFT JOIN similarity_results r ON s.id = r.submission_id
         WHERE s.status = 'completed'
-        GROUP BY s.id
+        GROUP BY s.id, s.uploaded_at, s.processing_started_at, s.processing_completed_at
+        HAVING processing_time IS NOT NULL
         ORDER BY s.uploaded_at ASC
     ''')
     rows = cursor.fetchall()
