@@ -155,6 +155,23 @@ function AdminDashboard() {
     ];
   };
 
+  const getProcessingBadge = (seconds) => {
+    const value = Number(seconds) || 0;
+
+    if (value > 15) {
+      return { label: 'CRITICAL', className: 'critical' };
+    }
+
+    if (value >= 11) {
+      return { label: 'WARNING', className: 'warning' };
+    }
+
+    return { label: 'OPTIMAL', className: 'optimal' };
+  };
+
+  const averageBadge = getProcessingBadge(processingTime.average_time);
+  const p95Badge = getProcessingBadge(processingTime.p95_time);
+
   if (loading) {
     return (
       <div className="dashboard-loading">
@@ -477,7 +494,7 @@ function AdminDashboard() {
                 <span className="stats-metric-label">Average Analysis Time</span>
                 <div className="stats-metric-value">
                   <span className="stats-metric-number">{processingTime.average_time}s</span>
-                  <span className="stats-metric-status optimal">OPTIMAL</span>
+                  <span className={`stats-metric-status ${averageBadge.className}`}>{averageBadge.label}</span>
                 </div>
               </div>
               <div className="stats-metric-row">
@@ -490,7 +507,7 @@ function AdminDashboard() {
                 <span className="stats-metric-label">95th Percentile</span>
                 <div className="stats-metric-value">
                   <span className="stats-metric-number">{processingTime.p95_time}s</span>
-                  <span className="stats-metric-status critical">CRITICAL P95</span>
+                  <span className={`stats-metric-status ${p95Badge.className}`}>{p95Badge.label}</span>
                 </div>
               </div>
             </div>

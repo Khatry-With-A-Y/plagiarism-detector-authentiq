@@ -548,6 +548,10 @@
   color: #16a34a;
 }
 
+.stats-metric-status.warning {
+  color: #d97706;
+}
+
 .stats-metric-status.critical {
   color: #dc2626;
 }
