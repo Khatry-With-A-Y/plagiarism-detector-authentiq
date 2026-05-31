@@ -345,3 +345,6 @@ def test_migrate_legacy_reviewer_status_check_allows_pending_apply():
 
 if __name__ == '__main__':
     test_database_initialization_stores_ngrams()
+    test_migrate_legacy_reviewer_status_trigger_allows_pending_apply()
+    test_migrate_legacy_reviewer_status_check_allows_pending_apply()
+    print("ALL DATABASE TESTS PASSED")

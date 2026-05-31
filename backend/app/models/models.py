@@ -285,6 +285,11 @@ class Paper:
         """Delete a paper from corpus"""
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Manually delete related similarity results first because the FK
+        # doesn't have ON DELETE CASCADE in the current schema and PRAGMA foreign_keys=ON is enabled.
+        cursor.execute('DELETE FROM similarity_results WHERE paper_id = ?', (paper_id,))
+        
         cursor.execute('DELETE FROM papers WHERE id = ?', (paper_id,))
         conn.commit()
         deleted = cursor.rowcount > 0

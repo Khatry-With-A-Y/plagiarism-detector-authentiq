@@ -580,8 +580,8 @@ def init_database():
             paper_id INTEGER NOT NULL,
             similarity_score REAL NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (submission_id) REFERENCES submissions(id),
-            FOREIGN KEY (paper_id) REFERENCES papers(id),
+            FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+            FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE,
             UNIQUE(submission_id, paper_id)
         )
     ''')
