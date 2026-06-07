@@ -159,7 +159,8 @@ def get_submissions():
             'similarity_score': round(max_similarity * 100, 2),  # Convert to percentage
             'highest_exact_match': round(highest_exact_match * 100, 2),
             'has_references': bool(s.get('has_references', 0)),  # Show if references detected
-            'reference_excluded': bool(s.get('main_content'))  # Show if references excluded from analysis
+            'reference_excluded': bool(s.get('main_content')),  # Show if references excluded from analysis
+            'review_status': s.get('review_status'),
         })
 
     return jsonify({'submissions': result}), 200
@@ -202,6 +203,11 @@ def delete_submission(submission_id):
     # Check ownership (unless admin)
     if submission['user_id'] != user['id'] and user['role'] != 'admin':
         return jsonify({'error': 'Access denied'}), 403
+
+    # Block deletion while review is active
+    active_statuses = {'pending', 'assigned', 'under_review', 'awaiting_admin', 'insufficient_pool'}
+    if submission.get('review_status') in active_statuses:
+        return jsonify({'error': 'Cannot delete submission while review is active'}), 403
 
     # Delete file if exists
     file_path = Path(submission['file_path'])

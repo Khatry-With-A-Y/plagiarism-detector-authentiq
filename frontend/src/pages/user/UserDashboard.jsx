@@ -1026,6 +1026,7 @@ function UserDashboard() {
                               className="dashboard-delete-btn"
                               onClick={() => handleDeleteClick(submission)}
                               title="Delete submission"
+                              style={submission.review_status && !['approved', 'rejected'].includes(submission.review_status) ? { visibility: 'hidden', pointerEvents: 'none' } : {}}
                             >
                               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <polyline points="3 6 5 6 21 6"></polyline>
