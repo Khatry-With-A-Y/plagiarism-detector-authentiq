@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, send_file
 from ..models.models import Submission, User, SimilarityResult, Reviewer, Notification, ReviewerInvite, Institution
 from ..utils.auth import (
     require_auth, require_admin, require_reviewer, get_current_user,
-    generate_access_token, generate_refresh_token, hash_password
+    generate_access_token, generate_refresh_token, hash_password, validate_password
 )
 from ..utils.mailer import send_reviewer_invite_email
 from ..utils.serializers import serialize_assignment, serialize_assignment_list
@@ -102,9 +102,9 @@ def get_admin_queue():
     except Exception:
         # Sweep failure must not break the queue read.
         pass
-    # Decline-handling Step 4: lazy auto-unpause sweep — flips any
-    # auto-paused reviewer whose rolling-window count has dropped below
-    # HARD_LIMIT back to active. Failure must not break the queue read.
+    # Lazy auto-unpause sweep — flips any auto-paused reviewer whose
+    # rolling-window count has dropped below HARD_LIMIT back to active.
+    # Failure must not break the queue read.
     try:
         Reviewer.sweep_paused_reviewers()
     except Exception:
@@ -360,7 +360,10 @@ def consume_invitation():
 
     current = get_current_user()
     if current:
-        if (current.get('email') or '').lower() != invite['institutional_email']:
+        email_match = (current.get('email') or '').lower() == invite['institutional_email']
+        inst_user = User.get_by_institutional_email(invite['institutional_email']) if not email_match else None
+        institutional_match = bool(inst_user and inst_user['id'] == current['id'])
+        if not email_match and not institutional_match:
             return jsonify({
                 'error': 'This invite belongs to a different account.',
                 'code': 'INVITE_ACCOUNT_MISMATCH',
@@ -371,7 +374,9 @@ def consume_invitation():
             return jsonify({'error': 'Your account is not eligible to review.'}), 403
         user = current
     else:
-        user = User.get_by_email(invite['institutional_email'])
+        user = User.get_by_email(invite['institutional_email'].strip().lower())
+        if not user:
+            user = User.get_by_institutional_email(invite['institutional_email'])
         if user and user.get('status') in ('blocked', 'paused'):
             return jsonify({'error': 'Your account is not eligible to review.'}), 403
         if not user:
@@ -397,12 +402,13 @@ def consume_invitation():
             if not user:
                 if not password:
                     return jsonify({'error': 'Password is required to complete account setup.'}), 400
-                if len(password) < 8:
-                    return jsonify({'error': 'Password must be at least 8 characters.'}), 400
+                valid, pw_error = validate_password(password)
+                if not valid:
+                    return jsonify({'error': pw_error}), 400
 
                 password_hash = hash_password(password)
                 try:
-                    user_id = User.create(username, invite['institutional_email'], password_hash, role='reviewer')
+                    user_id = User.create(username, invite['institutional_email'].strip().lower(), password_hash, role='reviewer')
                     user = User.get_by_id(user_id)
                 except ValueError as e:
                     # Final fallback check by email
@@ -494,7 +500,7 @@ def list_assignments():
         Submission.expire_overdue_assignments()
     except Exception:
         pass
-    # Decline-handling Step 4: lazy auto-unpause sweep alongside expiry.
+    # Lazy auto-unpause sweep alongside expiry.
     try:
         Reviewer.sweep_paused_reviewers()
     except Exception:
@@ -1059,9 +1065,8 @@ def get_admin_requests_summary():
 
 
 # ---------------------------------------------------------------------------
-# Decline-handling accountability layer (Step 4):
 # Admin manual waive of a single decline JSON entry inside a submission's
-# review_votes. See .junie/plans/decline-handling-implementation.md.
+# review_votes.
 # ---------------------------------------------------------------------------
 
 @reviews_bp.route(

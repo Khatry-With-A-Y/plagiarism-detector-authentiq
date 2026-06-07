@@ -447,7 +447,7 @@ def revoke_reviewer(target_user_id):
 @reviewers_bp.route('/admin/behaviour', methods=['GET'])
 @require_admin
 def admin_reviewer_behaviour():
-    """Decline-handling Step 5: admin Reviewer Behaviour aggregation.
+    """Admin Reviewer Behaviour aggregation.
 
     Returns one row per approved (and not-revoked) reviewer, with the
     rolling-window decline / expiry / vote counts computed on-demand from
@@ -467,7 +467,7 @@ def admin_reviewer_behaviour():
                            REVIEWER_DECLINE_WINDOW_DAYS)
     from ..models.models import get_db_connection
 
-    # Step 4 sweep before computing so paused state is fresh.
+    # Sweep before computing so paused state is fresh.
     try:
         Reviewer.sweep_paused_reviewers()
     except Exception:
@@ -550,7 +550,7 @@ def admin_reviewer_behaviour():
 )
 @require_admin
 def admin_reviewer_decline_events(target_user_id):
-    """Decline-handling Step 5: expand row -> recent decline JSON entries.
+    """Expand row -> recent decline JSON entries.
 
     Returns the up-to-N most recent declined `review_votes` entries for
     the given reviewer (across all submissions), so the admin can

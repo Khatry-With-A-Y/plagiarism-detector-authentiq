@@ -77,7 +77,7 @@ Write-Host "[2/6] Activating virtual environment..." -ForegroundColor Cyan
 & ".\venv\Scripts\Activate.ps1"
 
 Write-Host "[3/6] Installing/updating backend dependencies..." -ForegroundColor Cyan
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Failed to install dependencies" -ForegroundColor Red
     exit 1

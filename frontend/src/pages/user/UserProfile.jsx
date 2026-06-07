@@ -10,6 +10,7 @@ import {
   updateBio,
   updatePassword,
 } from '../../api/auth';
+import validatePassword from '../../utils/validatePassword';
 import '../dashboard.css';
 import './userProfile.css';
 
@@ -442,8 +443,9 @@ function ChangePasswordSection() {
       setErrorMsg('All fields are required.');
       return;
     }
-    if (newPw.length < 8) {
-      setErrorMsg('New password must be at least 8 characters.');
+    const pwError = validatePassword(newPw);
+    if (pwError) {
+      setErrorMsg(pwError);
       return;
     }
     if (newPw !== confirmPw) {

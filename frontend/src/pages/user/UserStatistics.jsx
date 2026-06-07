@@ -211,10 +211,8 @@ function UserStatistics({ isEmbedded = false }) {
       : 'month';
   const trendEmptyHint = `Submit completed reports to start tracking your ${trendGranularityLabel} originality.`;
   const trendInsufficientHint = `Add submissions in another ${trendPeriodUnit} to unlock a ${trendGranularityLabel} trend.`;
-  const trendPlaceholderTitle = plottableTrendPoints === 0
-    ? 'No originality trend available yet'
-    : 'Not enough data to draw a trend line';
-  const trendPlaceholderHint = plottableTrendPoints === 0 ? trendEmptyHint : trendInsufficientHint;
+  const trendPlaceholderTitle = 'No originality trend available yet';
+  const trendPlaceholderHint = trendEmptyHint;
   const trendChartColor = trendImproving ? '#22c55e' : '#1e40af';
 
   if (loading) {
@@ -461,7 +459,7 @@ function UserStatistics({ isEmbedded = false }) {
                   Retry
                 </button>
               </div>
-            ) : plottableTrendPoints <= 1 ? (
+            ) : plottableTrendPoints === 0 ? (
               <div className="ustats-trend-placeholder">
                 <svg viewBox="0 0 200 80" preserveAspectRatio="none" className="ustats-trend-placeholder-svg" aria-hidden="true">
                   <defs>

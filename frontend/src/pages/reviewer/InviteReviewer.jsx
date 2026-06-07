@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { reviewsAPI } from '../../api/reviews';
 import { setAccessToken } from '../../api/api';
 import { setUser, logout as clearAuth } from '../../utils/auth';
+import validatePassword from '../../utils/validatePassword';
+import Logo from '../../components/Logo';
 import '../dashboard.css';
 import '../auth.css';
 
@@ -112,8 +114,9 @@ function InviteReviewer() {
       setErrorMsg('Please enter a password to continue.');
       return;
     }
-    if (password.length < 8) {
-      setErrorMsg('Password must be at least 8 characters.');
+    const pwError = validatePassword(password);
+    if (pwError) {
+      setErrorMsg(pwError);
       return;
     }
     if (!confirmPassword) {
@@ -163,7 +166,10 @@ function InviteReviewer() {
 
       {state === 'needs_profile' && (
         <>
-          <h2 style={{ marginBottom: '8px' }}>Looks like it&apos;s your first time here!</h2>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+            <Logo />
+          </div>
+          <h2 style={{ marginBottom: '8px', textAlign: 'center' }}>Looks like it&apos;s your first time here!</h2>
           <p style={{ color: '#374151', marginTop: '4px' }}>
             This invite is for <strong>{invitedEmail || 'your institutional email'}</strong>.
             Please choose a username, password, and short biography to finish your first-time setup.

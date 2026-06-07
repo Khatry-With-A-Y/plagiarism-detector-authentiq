@@ -6,7 +6,7 @@ from flask import Blueprint, request, jsonify, send_from_directory
 from ..models.models import User
 from ..utils.auth import (
     hash_password, verify_password, generate_access_token, generate_refresh_token,
-    verify_token, get_current_user, require_auth, require_admin
+    verify_token, get_current_user, require_auth, require_admin, validate_password
 )
 from ..utils.database import get_db_connection
 from ...config import DATA_DIR
@@ -25,11 +25,15 @@ def register():
     """User registration"""
     data = request.get_json()
     username = data.get('username', '').strip() if data.get('username') else None
-    email = data.get('email', '').strip() if data.get('email') else None
+    email = data.get('email', '').strip().lower() if data.get('email') else None
     password = data.get('password')
     
     if not all([username, email, password]):
         return jsonify({'error': 'Missing required fields'}), 400
+    
+    valid, pw_error = validate_password(password)
+    if not valid:
+        return jsonify({'error': pw_error}), 400
     
     # Check if user already exists
     if User.get_by_username(username):
@@ -200,8 +204,9 @@ def change_password():
     if not verify_password(user['password_hash'], current_password):
         return jsonify({'error': 'Incorrect current password'}), 400
 
-    if len(new_password) < 8:
-        return jsonify({'error': 'New password must be at least 8 characters'}), 400
+    valid, pw_error = validate_password(new_password)
+    if not valid:
+        return jsonify({'error': pw_error}), 400
 
     new_hash = hash_password(new_password)
     User.update_password(user['id'], new_hash)

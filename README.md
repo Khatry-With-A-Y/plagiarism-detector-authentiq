@@ -59,7 +59,6 @@ tags so the next similarity check picks them up.
 | **Flask-Cors** (`Flask-Cors`) | CORS handling for the React dev server |
 | **PyJWT** (`PyJWT`) | JWT issuing & verification (auth cookies) |
 | **Werkzeug** / **Jinja2** / **itsdangerous** / **MarkupSafe** / **click** / **blinker** | Flask's standard runtime stack |
-| **cryptography** / **cffi** / **pycparser** | Backing crypto primitives used by JWT / TLS |
 | **requests** (`requests`) + **urllib3** / **certifi** / **idna** / **charset-normalizer** | Outbound HTTP (corpus download, fetch helpers) |
 | **sqlite3** (stdlib) | Database driver |
 
@@ -99,7 +98,7 @@ tags so the next similarity check picks them up.
 .\setup.ps1
 ```
 
-The script is idempotent: creates the venv, installs `requirements.txt`,
+The script is idempotent: creates the venv, installs `backend/requirements.txt`,
 runs `npm ci` in `frontend/`, downloads the seed corpus PDFs (~1.2 GB) if
 missing, initialises the SQLite schema, and ingests the seed corpus.
 

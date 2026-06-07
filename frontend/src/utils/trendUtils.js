@@ -6,7 +6,7 @@ const DEFAULT_CHART_HEIGHT = 80;
 const DEFAULT_CHART_MAX = 50;
 
 const SUPPORTED_GRANULARITIES = ['month', 'week', 'day'];
-const DEFAULT_GRANULARITY_ORDER = ['month', 'week', 'day'];
+const DEFAULT_GRANULARITY_ORDER = ['day', 'week', 'month'];
 
 const parseNumericValue = (value) => {
   const parsed = Number(value);
@@ -254,11 +254,18 @@ export function generateTrendPaths(points = [], width = DEFAULT_CHART_WIDTH, hei
     ? points.filter((point) => Number.isFinite(point?.x) && Number.isFinite(point?.y))
     : [];
 
-  if (validPoints.length < 2) {
+  if (validPoints.length === 0) {
     return {
       linePath: '',
       areaPath: ''
     };
+  }
+
+  if (validPoints.length === 1) {
+    const p = validPoints[0];
+    const linePath = `M 0 ${toPathNumber(p.y)} L ${safeWidth} ${toPathNumber(p.y)}`;
+    const areaPath = `${linePath} L ${safeWidth} ${safeHeight} L 0 ${safeHeight} Z`;
+    return { linePath, areaPath };
   }
 
   const linePath = validPoints
@@ -352,7 +359,7 @@ export function processAdaptiveTrendData(
     });
   });
 
-  const firstPlottableResult = granularityResults.find((result) => result.plottablePoints >= 2);
+  const firstPlottableResult = granularityResults.find((result) => result.plottablePoints >= 1);
   const selectedResult = firstPlottableResult || granularityResults[granularityResults.length - 1];
   const usedFallbackGranularity = selectedResult.granularity !== safeGranularityOrder[0];
 

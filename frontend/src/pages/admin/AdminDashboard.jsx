@@ -6,9 +6,6 @@ import CorpusManagement from './CorpusManagement';
 import UserManagement from './UserManagement';
 import ReviewerApplications from './ReviewerApplications';
 import ReviewQueue from './ReviewQueue';
-// Decline-handling Step 6: Reviewer Behaviour merged into User Management.
-// The standalone tab is gone; pause / unpause / waive levers live behind
-// the per-row "View Details" action in UserManagement.jsx.
 import ReviewBadge from '../../components/ReviewBadge';
 import Avatar from '../../components/Avatar';
 import Logo from '../../components/Logo';
@@ -241,9 +238,6 @@ function AdminDashboard() {
               isActive={activeTab === 'review-queue'}
               onClick={() => setActiveTab('review-queue')}
             />
-            {/* Decline-handling Step 6: the standalone Reviewer Behaviour
-                tab was removed; its aggregations and pause / unpause / waive
-                controls now live inside User Management → per-row View Details. */}
           </div>
         </div>
         <div className="dashboard-navbar-right">

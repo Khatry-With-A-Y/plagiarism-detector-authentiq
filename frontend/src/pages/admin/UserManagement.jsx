@@ -9,19 +9,6 @@ import reviewsAPI from '../../api/reviews';
 import '../dashboard.css';
 import './userManagement.css';
 
-/**
- * Decline-handling Step 6: User Management now also surfaces the per-reviewer
- * decline / expiry / vote counters and the pause / unpause / block / unblock / waive levers
- * that previously lived on a separate "Reviewer Behaviour" admin tab.
- *
- * The table stays compact (identity + role + status + actions), while
- * activity and reviewer-behaviour counters are surfaced in the modal —
- * institution row, full metric grid, recent decline events with Waive,
- * Pause / Unpause and Block / Unblock buttons — is exposed behind the existing "View Details"
- * action button so the table stays compact.
- *
- * See .junie/plans/decline-handling-implementation.md § Step 6.
- */
 function UserManagement({ isEmbedded = false }) {
   const { user, logout } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -570,11 +557,7 @@ function UserManagement({ isEmbedded = false }) {
           </div>
         </div>
 
-        {/* ------------------------------------------------------------ */}
-        {/* Step 6: per-user Details modal — replaces the standalone     */}
-        {/* "Reviewer Behaviour" admin tab. Reuses the project-wide       */}
-        {/* dashboard-modal-* styling already shipped in dashboard.css.   */}
-        {/* ------------------------------------------------------------ */}
+        {/* Per-user Details modal */}
         {detailsUser && (() => {
           const u = detailsUser;
           const b = behaviourByUserId[u.id] || null;

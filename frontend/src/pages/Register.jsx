@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Logo from "../components/Logo";
 import useAuth from "../hooks/useAuth";
+import validatePassword from "../utils/validatePassword";
 import "./auth.css";
 
 function Register() {
@@ -17,6 +18,12 @@ function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
+
+    const pwError = validatePassword(password);
+    if (pwError) {
+      setError(pwError);
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError("Passwords do not match");

@@ -12,7 +12,7 @@ class User:
     def create(username, email, password_hash, role='user'):
         """Create a new user"""
         username = username.strip() if username else username
-        email = email.strip() if email else email
+        email = email.strip().lower() if email else email
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
@@ -59,6 +59,22 @@ class User:
             "SELECT *, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at "
             "FROM users WHERE LOWER(email) = LOWER(?)",
             (email,),
+        )
+        user = cursor.fetchone()
+        conn.close()
+        return dict(user) if user else None
+
+    @staticmethod
+    def get_by_institutional_email(institutional_email):
+        """Get user whose reviewer profile has the given institutional email"""
+        institutional_email = institutional_email.strip().lower() if institutional_email else institutional_email
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT u.*, strftime('%Y-%m-%dT%H:%M:%SZ', u.created_at) as created_at "
+            "FROM users u JOIN reviewers r ON u.id = r.user_id "
+            "WHERE LOWER(r.institutional_email) = LOWER(?)",
+            (institutional_email,),
         )
         user = cursor.fetchone()
         conn.close()
@@ -2931,9 +2947,7 @@ class Reviewer:
             conn.close()
 
     # ------------------------------------------------------------------
-    # Decline-handling accountability layer (Step 4):
-    # manual pause / unpause + lazy auto-unpause sweep.
-    # See .junie/plans/decline-handling-implementation.md.
+    # Manual pause / unpause + lazy auto-unpause sweep.
     # ------------------------------------------------------------------
     @staticmethod
     def sweep_paused_reviewers():

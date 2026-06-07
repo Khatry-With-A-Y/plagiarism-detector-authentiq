@@ -988,14 +988,6 @@ function ReviewQueue() {
                         {detailModal.assignments.length} reviewer{detailModal.assignments.length === 1 ? '' : 's'} assigned
                       </span>
                     )}
-                    {/* Decline-handling Step 5: per-submission decline-churn
-                        badge. Surfaces how many reviewers have declined
-                        *this* submission so admins notice churn without
-                        opening the Reviewer Behaviour page.
-
-                        Counted from the same `assignments` array (which
-                        the backend serializes from `submissions.review_votes`).
-                        See .junie/plans/decline-handling-implementation.md. */}
                     {(() => {
                       const priorDeclines = (detailModal.assignments || []).filter(
                         (a) => a.assignment_status === 'declined'

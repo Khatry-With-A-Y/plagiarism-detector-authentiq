@@ -89,11 +89,10 @@ export const reviewsAPI = {
     getSubmissionPanel: (submissionId) =>
         api.get(`/reviews/submissions/${submissionId}/panel`),
 
-    // Decline-handling Step 4: admin waives a single decline JSON entry
-    // inside a submission's `review_votes`. If the reviewer was
-    // auto-paused and the waiver drops them below the hard limit, they
-    // are unpaused atomically in the same transaction.
-    // See .junie/plans/decline-handling-implementation.md.
+    // Admin waives a single decline JSON entry inside a submission's
+    // `review_votes`. If the reviewer was auto-paused and the waiver
+    // drops them below the hard limit, they are unpaused atomically in
+    // the same transaction.
     adminWaiveDeclineEvent: (submissionId, reviewerId) =>
         api.post(
             `/reviews/admin/submissions/${submissionId}/decline-events/${reviewerId}/waive`

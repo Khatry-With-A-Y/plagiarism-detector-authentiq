@@ -1,10 +1,8 @@
 blinker==1.9.0
 certifi==2026.2.25
-cffi==2.0.0
 charset-normalizer==3.4.4
 click==8.3.1
 colorama==0.4.6
-cryptography==46.0.3
 docx2txt==0.8
 Flask==3.0.0
 Flask-Cors==4.0.0
@@ -14,7 +12,6 @@ Jinja2==3.1.6
 lxml==6.0.2
 MarkupSafe==3.0.3
 pillow==12.1.0
-pycparser==3.0
 PyJWT==2.8.0
 PyMuPDF==1.27.2
 python-docx==1.1.0
